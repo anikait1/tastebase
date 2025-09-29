@@ -1,0 +1,29 @@
+{
+  "name": "recipe-gpt",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/pg": "^8.15.5",
+    "drizzle-kit": "^0.31.4",
+    "prettier": "3.6.2"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.35",
+    "@elysiajs/openapi": "^1.4.11",
+    "@openrouter/ai-sdk-provider": "^1.2.0",
+    "ai": "^5.0.51",
+    "drizzle-orm": "^0.44.5",
+    "elysia": "^1.4.7",
+    "pg": "^8.16.3",
+    "youtubei.js": "^15.1.1",
+    "zod": "^4.1.11"
+  }
+}

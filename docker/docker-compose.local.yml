@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17-trixie
+    container_name: recipes-db
+    environment:
+      POSTGRES_USER: recipellm
+      POSTGRES_PASSWORD: recipellm
+      POSTGRES_DB: recipes
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./pgvector-init.sql:/docker-entrypoint-initdb.d/init-pgvector.sql:ro
+
+volumes:
+  pgdata:
