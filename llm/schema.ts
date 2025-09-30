@@ -3,7 +3,7 @@ import * as z from "zod";
 export const RecipeRawSchema = z
   .object({
     name: z.string().nullable(),
-    description: z.string().nullable(),
+    instructions: z.string().nullable(),
     ingredients: z.array(
       z.object({
         name: z.string(),
@@ -23,7 +23,7 @@ export const RecipeRawSchema = z
 export const RecipeParsedSchema = z
   .object({
     name: z.string().transform((value) => value.trim().toLowerCase()),
-    description: z.string(),
+    instructions: z.string(),
     ingredients: z.array(
       z.object({
         name: z.string().transform((value) => value.trim().toLowerCase()),

@@ -46,7 +46,7 @@ export async function generateRecipeEmbedding(
 
   const text = [
     `Name: ${recipe.name}`,
-    `Description: ${recipe.description}`,
+    `Instructions: ${recipe.instructions}`,
     `Ingredients: ${ingredientsText}`,
     `Tags: ${recipe.tags.join(", ")}`,
   ].join("\n");

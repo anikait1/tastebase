@@ -7,8 +7,9 @@ import { Innertube } from "youtubei.js";
  */
 let client: Innertube;
 
-export async function init() {
+export async function init(): Promise<Innertube> {
   client = await Innertube.create();
+  return client;
 }
 
 export async function getTranscript(videoId: string): Promise<string> {

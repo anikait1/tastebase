@@ -1,5 +1,5 @@
 import { youtubeShortsRecipeSchema, type InputRecipeSchema } from "./schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql, cosineDistance, gt, desc } from "drizzle-orm";
 import {
   recipe_source_schema,
   recipe_schema,
@@ -12,6 +12,7 @@ import { strict as assert } from "node:assert";
 import type { Database } from "../db";
 
 import * as RecipeJobService from "./job";
+import * as LlmService from "../llm/service";
 import type { ZodError } from "zod";
 
 function getExternalIdBySourceType(
@@ -57,7 +58,7 @@ export async function processRecipeFromSource(
           recipe: {
             id: recipe_schema.id,
             name: recipe_schema.name,
-            description: recipe_schema.description,
+            instructions: recipe_schema.instructions,
             tags: recipe_schema.tags,
             ingredients: recipe_schema.ingredients,
           },
@@ -136,7 +137,7 @@ export async function processRecipeFromSource(
               .values({
                 recipe_source_id: recipeJob.recipe_source_id,
                 name: parsedRecipe.name,
-                description: parsedRecipe.description,
+                instructions: parsedRecipe.instructions,
                 tags: parsedRecipe.tags,
                 ingredients: parsedRecipe.ingredients,
               })
@@ -156,4 +157,25 @@ export async function processRecipeFromSource(
       return { type: "job-created", job: recipeJob };
     }
   }
+}
+
+export async function searchRecipes(query: string, db: Database) {
+  const queryEmbeddings = await LlmService.generateQueryEmbedding(query);
+  const similarity = sql<number>`1 - ${cosineDistance(embedding_schema.data, queryEmbeddings)}`;
+
+  return await db
+    .select({
+      similarity,
+      recipe: {
+        id: recipe_schema.id,
+        name: recipe_schema.name,
+        instructions: recipe_schema.instructions,
+        ingredients: recipe_schema.ingredients,
+        tags: recipe_schema.tags
+      }
+    })
+    .from(embedding_schema)
+    .innerJoin(recipe_schema, eq(embedding_schema.recipe_id, recipe_schema.id))
+    .where(gt(similarity, 0.4))
+    .orderBy((t) => desc(t.similarity));
 }

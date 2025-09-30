@@ -13,7 +13,10 @@
     "typescript": "^5"
   },
   "scripts": {
-    "format": "prettier --write ."
+    "dev": "bun --watch server.ts",
+    "format": "prettier --write .",
+    "db:generate": "bun run --bun drizzle-kit generate --config ./db/drizzle.config.ts",
+    "db:migrate": "bun run --bun drizzle-kit migrate --config ./db/drizzle.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.35",
