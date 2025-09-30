@@ -82,7 +82,7 @@ export async function youtubeShortRecipeProcessor(
       .set({
         status: "failed",
         steps: pipeline,
-        error_message: pipeline[0].error,
+        error_message: `Unable to generate the transcript for the provided video`,
         updated_at: sql`NOW()`,
       })
       .where(eq(recipe_job_schema.id, jobId));
@@ -106,7 +106,7 @@ export async function youtubeShortRecipeProcessor(
       .set({
         status: "failed",
         steps: pipeline,
-        error_message: pipeline[1].error,
+        error_message: `Unable to parse the recipe instructions`,
         updated_at: sql`NOW()`,
       })
       .where(eq(recipe_job_schema.id, jobId));
@@ -133,7 +133,7 @@ export async function youtubeShortRecipeProcessor(
       .set({
         status: "failed",
         steps: pipeline,
-        error_message: pipeline[2].error,
+        error_message: `Unable to generate data required to make the recipe searchable`,
         updated_at: sql`NOW()`,
       })
       .where(eq(recipe_job_schema.id, jobId));
