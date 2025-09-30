@@ -7,9 +7,12 @@ import {
   recipe_job_schema,
 } from "../db/schema";
 
+import { strict as assert } from "node:assert";
+
 import type { Database } from "../db";
 
-import * as RecipeJobProcessor from "./job";
+import * as RecipeJobService from "./job";
+import type { ZodError } from "zod";
 
 function getExternalIdBySourceType(
   sourceType: "youtube-shorts",
@@ -21,24 +24,35 @@ function getExternalIdBySourceType(
   }
 }
 
+function ensureDefined<T>(
+  value: T,
+  message?: string,
+): asserts value is NonNullable<T> {
+  assert.notEqual(value, undefined, message);
+  assert.notEqual(value, null, message);
+}
+
+type ProcessRecipeResult =
+  | { type: "validation-error"; error: ZodError }
+  | { type: "recipe-already-exists-error" }
+  | { type: "job-created"; job: typeof recipe_job_schema.$inferSelect };
+
 export async function processRecipeFromSource(
   schema: InputRecipeSchema,
   db: Database,
-) {
+): Promise<ProcessRecipeResult> {
   switch (schema.type) {
     case "youtube-shorts": {
       const schemaParseResult = youtubeShortsRecipeSchema.safeParse(
         schema.data,
       );
-
-      if (schemaParseResult.error) {
-        return schemaParseResult.error;
-      }
+      if (schemaParseResult.error)
+        return { type: "validation-error", error: schemaParseResult.error };
 
       const { id: videoId } = schemaParseResult.data;
       const externalId = getExternalIdBySourceType(schema.type, videoId);
 
-      const existingRecipe = db
+      const [existingRecipe] = await db
         .select({
           recipe: {
             id: recipe_schema.id,
@@ -59,73 +73,87 @@ export async function processRecipeFromSource(
             eq(recipe_source_schema.external_id, externalId),
           ),
         );
+      if (existingRecipe) return { type: "recipe-already-exists-error" };
 
-      if (existingRecipe) return existingRecipe;
+      // TODO (anikait) - handle on conflict errors
+      const recipeJob = await db.transaction(
+        async function createRecipeJob(txn) {
+          const [recipeSource] = await txn
+            .insert(recipe_source_schema)
+            .values({
+              external_id: externalId,
+              type: schema.type,
+            })
+            .returning();
 
-      const recipeJob = await db.transaction(async (txn) => {
-        const [recipeSource] = await txn
-          .insert(recipe_source_schema)
-          .values({
-            external_id: externalId,
-            type: schema.type,
-          })
-          .returning();
+          ensureDefined(recipeSource);
 
-        // TODO: add reason why this is for typescript
-        if (!recipeSource) throw new Error();
+          const [recipeJob] = await txn
+            .insert(recipe_job_schema)
+            .values({
+              recipe_source_id: recipeSource.id,
+            })
+            .returning();
 
-        // TODO - handle on conflict error
-        const [recipeJob] = await txn
-          .insert(recipe_job_schema)
-          .values({
-            recipe_source_id: recipeSource.id,
-          })
-          .returning();
-
-        // TODO: add reason why this is for typescript
-        if (!recipeJob) throw new Error();
-
-        return recipeJob;
-      });
-
-      await db.update(recipe_job_schema).set({
-        status: "processing",
-      });
-
-      const pipeline = await RecipeJobProcessor.youtubeShortRecipeProcessor(
-        videoId,
-        recipeJob.id,
-        db,
+          ensureDefined(recipeJob);
+          return recipeJob;
+        },
       );
 
-      const parsedRecipe = pipeline[1].data;
-      const generatedEmbeddings = pipeline[2].data;
+      /**
+       * TODO (anikait) - Move this function to a separate worker
+       * When moving to a separate worker, we would most likely need
+       * to change a bit of logic and only pass in the `recipeJob.id`
+       */
+      setImmediate(async function runRecipeJob(db) {
+        try {
+          await db
+            .update(recipe_job_schema)
+            .set({
+              status: "processing",
+            })
+            .where(eq(recipe_job_schema.id, recipeJob.id));
 
-      if (!parsedRecipe || !generatedEmbeddings) {
-        return null;
-      }
+          const pipeline = await RecipeJobService.youtubeShortRecipeProcessor(
+            videoId,
+            recipeJob.id,
+            db,
+          );
+          const parsedRecipe = pipeline[1].data;
+          const generatedEmbeddings = pipeline[2].data;
 
-      await db.transaction(async (txn) => {
-        const [recipe] = await txn
-          .insert(recipe_schema)
-          .values({
-            recipe_source_id: recipeJob.recipe_source_id,
-            name: parsedRecipe.name,
-            description: parsedRecipe.description,
-            tags: parsedRecipe.tags,
-            ingredients: parsedRecipe.ingredients,
-          })
-          .returning();
+          if (!parsedRecipe || !generatedEmbeddings) {
+            console.log(`Unable to process youtube video`, {
+              jobId: recipeJob.id,
+              videoId,
+            });
+            return;
+          }
 
-        // TODO - for the typescript
-        if (!recipe) throw new Error("");
+          await db.transaction(async function createRecipe(txn) {
+            const [recipe] = await txn
+              .insert(recipe_schema)
+              .values({
+                recipe_source_id: recipeJob.recipe_source_id,
+                name: parsedRecipe.name,
+                description: parsedRecipe.description,
+                tags: parsedRecipe.tags,
+                ingredients: parsedRecipe.ingredients,
+              })
+              .returning();
 
-        await txn.insert(embedding_schema).values({
-          recipe_id: recipe.id,
-          type: "text",
-          data: generatedEmbeddings,
-        });
-      });
+            ensureDefined(recipe);
+
+            await txn.insert(embedding_schema).values({
+              recipe_id: recipe.id,
+              type: "text",
+              data: generatedEmbeddings,
+            });
+          });
+        } catch (err) {}
+      }, db);
+
+      return { type: "job-created", job: recipeJob };
     }
   }
 }

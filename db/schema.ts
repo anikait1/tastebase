@@ -8,6 +8,7 @@ import {
   integer,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { YoutubeShortRecipePipeline } from "../recipe/job";
 
 export const recipe_source_schema = pgTable("recipe_sources", {
   id: serial("id").primaryKey(),
@@ -47,7 +48,7 @@ export const recipe_job_schema = pgTable("recipe_jobs", {
     .unique(),
   // created, processing, failed, success
   status: text("status").notNull().default("created"),
-  steps: jsonb("steps").notNull().default([]),
+  steps: jsonb("steps").notNull().default([]).$type<YoutubeShortRecipePipeline>(),
   current_step_index: integer("current_step_index"),
   started_at: timestamp("started_at"),
   updated_at: timestamp("updated_at"),

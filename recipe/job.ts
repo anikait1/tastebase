@@ -152,3 +152,11 @@ export async function youtubeShortRecipeProcessor(
 
   return pipeline;
 }
+
+
+export async function getRecipeJob(jobId: number, db: Database): Promise<typeof recipe_job_schema.$inferSelect | null> {
+  const [job] = await db.select().from(recipe_job_schema).where(eq(recipe_job_schema.id, jobId));
+  if (!job) return null;
+
+  return job;
+}
