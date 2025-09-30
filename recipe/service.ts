@@ -161,7 +161,7 @@ export async function processRecipeFromSource(
 
 export async function searchRecipes(query: string, db: Database) {
   const queryEmbeddings = await LlmService.generateQueryEmbedding(query);
-  const similarity = sql<number>`1 - ${cosineDistance(embedding_schema.data, queryEmbeddings)}`;
+  const similarity = sql<number>`1 - (${cosineDistance(embedding_schema.data, queryEmbeddings)})`;
 
   return await db
     .select({
@@ -176,6 +176,5 @@ export async function searchRecipes(query: string, db: Database) {
     })
     .from(embedding_schema)
     .innerJoin(recipe_schema, eq(embedding_schema.recipe_id, recipe_schema.id))
-    .where(gt(similarity, 0.4))
     .orderBy((t) => desc(t.similarity));
 }

@@ -34,7 +34,9 @@ const app = new Elysia()
       body: inputRecipeSchema,
     },
   )
-  .get("/recipe", () => {}, {
+  .get("/recipe", async ({query, db}) => {
+    return await RecipeService.searchRecipes(query.q, db)
+  }, {
     query: z.object({
       q: z.string().min(1),
     }),
