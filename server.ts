@@ -88,7 +88,7 @@ const app = new Elysia()
   )
   .get(
     "/recipe",
-    async ({logger, query, db}) => {
+    async ({ logger, query, db }) => {
       logger.debug({ query: query.q }, "Searching recipes");
       return RecipeService.searchRecipes(query.q, db);
     },
@@ -100,7 +100,7 @@ const app = new Elysia()
   )
   .get(
     "/recipe-job/:job-id",
-    async ({params, db, logger}) => {
+    async ({ params, db, logger }) => {
       const job = await RecipeJobService.getRecipeJob(params["job-id"], db);
       if (!job) {
         logger.warn({ jobId: params["job-id"] }, "Recipe job not found");

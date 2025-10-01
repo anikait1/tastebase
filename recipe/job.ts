@@ -72,7 +72,7 @@ async function runStep<T, P extends unknown[]>(
  * TODO(anikait): A better of handling this job processing
  * exists for sure. Need to figure out how will different pieces
  * fit in together and then refactor the flow here
- * 
+ *
  * The logger passed to this function already has the
  * bindings set for videoId and jobId, no need to set those
  * bindings in here
@@ -93,7 +93,7 @@ export async function youtubeShortRecipeProcessor(
       started_at: sql`NOW()`,
       updated_at: sql`NOW()`,
     })
-    .where(eq(recipe_job_schema.id, jobId));  
+    .where(eq(recipe_job_schema.id, jobId));
   logger.debug({ stepIndex: 0 }, "Advancing to recipe instructions step");
 
   const pipeline: YoutubeShortRecipePipeline = [

@@ -17,7 +17,7 @@ export async function getTranscript(videoId: string): Promise<string> {
   /**
    * In case the `getTranscript` function does not work properly and older fallback implementation
    * is available: https://github.com/LuanRT/YouTube.js/issues/501
-   * 
+   *
    * TODO (error handling) - Innertube client raises the following error with the message
    * Class: InnerTubeError
    * Message: "Transcript panel not found. Video likely has no transcript."

@@ -46,23 +46,26 @@ export async function processRecipeFromSource(
   logger: AppLogger,
 ): Promise<ProcessRecipeResult> {
   const scopedLog = logger.child({
-        scope: "recipe-service",
-        source: schema.type,
-      });
+    scope: "recipe-service",
+    source: schema.type,
+  });
 
-      switch (schema.type) {
+  switch (schema.type) {
     case "youtube-shorts": {
       const parsedSource = youtubeShortsRecipeSchema.safeParse(schema.data);
       if (parsedSource.error) {
-        scopedLog.warn({
-          validationIssues: z.prettifyError(parsedSource.error)
-        }, "Recipe input validation failed")
+        scopedLog.warn(
+          {
+            validationIssues: z.prettifyError(parsedSource.error),
+          },
+          "Recipe input validation failed",
+        );
 
         return { type: "validation-error", error: parsedSource.error };
       }
 
       const { id: videoId } = parsedSource.data;
-      scopedLog.setBindings({videoId})
+      scopedLog.setBindings({ videoId });
       scopedLog.info("Processing recipe source");
 
       const externalId = getExternalIdBySourceType(schema.type, videoId);
@@ -121,7 +124,7 @@ export async function processRecipeFromSource(
         },
       );
       scopedLog.info({ jobId: recipeJob.id }, "Recipe job created");
-      scopedLog.setBindings({jobId: recipeJob.id})
+      scopedLog.setBindings({ jobId: recipeJob.id });
 
       /**
        * TODO (anikait) - Move this function to a separate worker
@@ -177,7 +180,10 @@ export async function processRecipeFromSource(
             );
           });
         } catch (err) {
-          scopedLog.error({ err }, "Recipe job execution failed with an unknown error");
+          scopedLog.error(
+            { err },
+            "Recipe job execution failed with an unknown error",
+          );
         }
       }, db);
 
