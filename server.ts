@@ -6,10 +6,58 @@ import * as RecipeService from "./recipe/service";
 import * as RecipeJobService from "./recipe/job";
 import * as YoutubeService from "./youtube/service";
 import { dbClient } from "./db";
+import { baseLogger } from "./logger";
+
+const youtubeClient = await YoutubeService.init();
 
 const app = new Elysia()
+  .derive(function setRequestId({ set }) {
+    let requestId = set.headers["x-request-id"];
+    if (!requestId) {
+      requestId = Bun.randomUUIDv7();
+      set.headers["x-request-id"] = requestId;
+    }
+
+    return { requestId };
+  })
+  .derive(function getRequestStartTime() {
+    return { startTime: performance.now() };
+  })
+  .derive(function setupRequestLogger({ requestId, request }) {
+    const logger = baseLogger.child({
+      scope: "http",
+      requestId,
+      method: request.method,
+      url: request.url,
+    });
+
+    return { logger };
+  })
+  .onError(function logError({ logger, error, code }) {
+    if (!logger) {
+      console.error("Logger not setup", error);
+      return;
+    }
+
+    logger.error(
+      {
+        error,
+        code,
+      },
+      "Request encountered an error",
+    );
+  })
+  .onAfterResponse(function logResponseTime({ logger, set, startTime }) {
+    logger.info(
+      {
+        status: set.status ?? 200,
+        duration: performance.now() - startTime,
+      },
+      "Request Completed",
+    );
+  })
   .decorate("db", dbClient)
-  .decorate("yt", await YoutubeService.init())
+  .decorate("yt", youtubeClient)
   .use(
     openapi({
       mapJsonSchema: {
@@ -19,8 +67,12 @@ const app = new Elysia()
   )
   .post(
     "/recipe",
-    async ({ status, body, db }) => {
-      const result = await RecipeService.processRecipeFromSource(body, db);
+    async ({ logger, body, status, db }) => {
+      const result = await RecipeService.processRecipeFromSource(
+        body,
+        db,
+        logger,
+      );
       switch (result.type) {
         case "validation-error":
           return status("Bad Request", result.error.message);
@@ -34,19 +86,28 @@ const app = new Elysia()
       body: inputRecipeSchema,
     },
   )
-  .get("/recipe", async ({query, db}) => {
-    return await RecipeService.searchRecipes(query.q, db)
-  }, {
-    query: z.object({
-      q: z.string().min(1),
-    }),
-  })
+  .get(
+    "/recipe",
+    async ({logger, query, db}) => {
+      logger.debug({ query: query.q }, "Searching recipes");
+      return RecipeService.searchRecipes(query.q, db);
+    },
+    {
+      query: z.object({
+        q: z.string().min(1),
+      }),
+    },
+  )
   .get(
     "/recipe-job/:job-id",
-    async ({ params, db }) => {
+    async ({params, db, logger}) => {
       const job = await RecipeJobService.getRecipeJob(params["job-id"], db);
-      if (!job) return status("Not Found");
+      if (!job) {
+        logger.warn({ jobId: params["job-id"] }, "Recipe job not found");
+        return status("Not Found");
+      }
 
+      logger.debug({ jobId: job.id, status: job.status }, "Recipe job fetched");
       return job;
     },
     {
@@ -62,4 +123,4 @@ const app = new Elysia()
   })
   .listen(6969);
 
-console.log(`🦊 Elysia is running on ${app.server?.url}`);
+baseLogger.info({ url: app.server?.url }, "Elysia server listening");

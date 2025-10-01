@@ -1,5 +1,5 @@
 import { youtubeShortsRecipeSchema, type InputRecipeSchema } from "./schema";
-import { eq, and, sql, cosineDistance, gt, desc } from "drizzle-orm";
+import { eq, and, sql, cosineDistance, desc } from "drizzle-orm";
 import {
   recipe_source_schema,
   recipe_schema,
@@ -13,7 +13,9 @@ import type { Database } from "../db";
 
 import * as RecipeJobService from "./job";
 import * as LlmService from "../llm/service";
+import * as z from "zod";
 import type { ZodError } from "zod";
+import type { AppLogger } from "../logger";
 
 function getExternalIdBySourceType(
   sourceType: "youtube-shorts",
@@ -41,18 +43,29 @@ type ProcessRecipeResult =
 export async function processRecipeFromSource(
   schema: InputRecipeSchema,
   db: Database,
+  logger: AppLogger,
 ): Promise<ProcessRecipeResult> {
-  switch (schema.type) {
+  const scopedLog = logger.child({
+        scope: "recipe-service",
+        source: schema.type,
+      });
+
+      switch (schema.type) {
     case "youtube-shorts": {
-      const schemaParseResult = youtubeShortsRecipeSchema.safeParse(
-        schema.data,
-      );
-      if (schemaParseResult.error)
-        return { type: "validation-error", error: schemaParseResult.error };
+      const parsedSource = youtubeShortsRecipeSchema.safeParse(schema.data);
+      if (parsedSource.error) {
+        scopedLog.warn({
+          validationIssues: z.prettifyError(parsedSource.error)
+        }, "Recipe input validation failed")
 
-      const { id: videoId } = schemaParseResult.data;
+        return { type: "validation-error", error: parsedSource.error };
+      }
+
+      const { id: videoId } = parsedSource.data;
+      scopedLog.setBindings({videoId})
+      scopedLog.info("Processing recipe source");
+
       const externalId = getExternalIdBySourceType(schema.type, videoId);
-
       const [existingRecipe] = await db
         .select({
           recipe: {
@@ -74,9 +87,16 @@ export async function processRecipeFromSource(
             eq(recipe_source_schema.external_id, externalId),
           ),
         );
-      if (existingRecipe) return { type: "recipe-already-exists-error" };
 
-      // TODO (anikait) - handle on conflict errors
+      if (existingRecipe) {
+        scopedLog.info(
+          { recipeId: existingRecipe.recipe.id, externalId },
+          "Recipe already exists for source",
+        );
+        return { type: "recipe-already-exists-error" };
+      }
+
+      scopedLog.info({ externalId }, "Creating recipe job");
       const recipeJob = await db.transaction(
         async function createRecipeJob(txn) {
           const [recipeSource] = await txn
@@ -100,6 +120,8 @@ export async function processRecipeFromSource(
           return recipeJob;
         },
       );
+      scopedLog.info({ jobId: recipeJob.id }, "Recipe job created");
+      scopedLog.setBindings({jobId: recipeJob.id})
 
       /**
        * TODO (anikait) - Move this function to a separate worker
@@ -108,26 +130,24 @@ export async function processRecipeFromSource(
        */
       setImmediate(async function runRecipeJob(db) {
         try {
-          await db
-            .update(recipe_job_schema)
-            .set({
-              status: "processing",
-            })
-            .where(eq(recipe_job_schema.id, recipeJob.id));
-
           const pipeline = await RecipeJobService.youtubeShortRecipeProcessor(
             videoId,
             recipeJob.id,
             db,
+            scopedLog,
           );
           const parsedRecipe = pipeline[1].data;
           const generatedEmbeddings = pipeline[2].data;
 
           if (!parsedRecipe || !generatedEmbeddings) {
-            console.log(`Unable to process youtube video`, {
-              jobId: recipeJob.id,
-              videoId,
-            });
+            scopedLog.error(
+              {
+                failedSteps: pipeline
+                  .filter((step) => step.error)
+                  .map((step) => ({ name: step.name, error: step.error })),
+              },
+              "Recipe pipeline failed to generate required data",
+            );
             return;
           }
 
@@ -150,8 +170,15 @@ export async function processRecipeFromSource(
               type: "text",
               data: generatedEmbeddings,
             });
+
+            scopedLog.info(
+              { recipeId: recipe.id },
+              "Recipe persisted from processed job",
+            );
           });
-        } catch (err) {}
+        } catch (err) {
+          scopedLog.error({ err }, "Recipe job execution failed with an unknown error");
+        }
       }, db);
 
       return { type: "job-created", job: recipeJob };
@@ -161,20 +188,34 @@ export async function processRecipeFromSource(
 
 export async function searchRecipes(query: string, db: Database) {
   const queryEmbeddings = await LlmService.generateQueryEmbedding(query);
-  const similarity = sql<number>`1 - (${cosineDistance(embedding_schema.data, queryEmbeddings)})`;
 
+  const similarity = sql<number>`1 - (${cosineDistance(
+    embedding_schema.data,
+    queryEmbeddings,
+  )})`;
+
+  const keywordScore = sql<number>`ts_rank_cd(
+    setweight(to_tsvector('english', coalesce(${recipe_schema.name}, '')), 'A') ||
+    setweight(to_tsvector('english', array_to_string(${recipe_schema.tags}, ' ')), 'B') ||
+    setweight(to_tsvector('english', coalesce(${recipe_schema.ingredients}::text, '')), 'A'),
+    plainto_tsquery('english', ${query})
+  )`;
+
+  const finalScore = sql<number>`(0.7 * ${similarity} + 0.3 * ${keywordScore})`;
   return await db
     .select({
       similarity,
+      keywordScore,
+      finalScore,
       recipe: {
         id: recipe_schema.id,
         name: recipe_schema.name,
         instructions: recipe_schema.instructions,
         ingredients: recipe_schema.ingredients,
-        tags: recipe_schema.tags
-      }
+        tags: recipe_schema.tags,
+      },
     })
     .from(embedding_schema)
     .innerJoin(recipe_schema, eq(embedding_schema.recipe_id, recipe_schema.id))
-    .orderBy((t) => desc(t.similarity));
+    .orderBy(desc(finalScore));
 }
