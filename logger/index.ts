@@ -1,4 +1,4 @@
-import pino, { type Bindings, type LoggerOptions } from "pino";
+import pino, { type LoggerOptions } from "pino";
 
 const level = Bun.env.LOG_LEVEL ?? "debug";
 const createBaseLogger = () => {
