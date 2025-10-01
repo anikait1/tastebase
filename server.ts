@@ -83,6 +83,11 @@ const app = new Elysia()
       }
     },
     {
+      detail: {
+        summary: "Create recipe",
+        description:
+          "Processes a recipe from a source URL (currently supports YouTube Shorts). Creates a background job to extract and process the recipe content. Returns the job object on success, or validation/conflict errors if the recipe already exists or input is invalid.",
+      },
       body: inputRecipeSchema,
     },
   )
@@ -93,8 +98,13 @@ const app = new Elysia()
       return RecipeService.searchRecipes(query.q, db);
     },
     {
+      detail: {
+        summary: "Search recipes",
+        description:
+          "Searches through processed recipes using a text query. Returns a list of recipes that match the search criteria based on recipe content, ingredients, or other metadata.",
+      },
       query: z.object({
-        q: z.string().min(1),
+        q: z.string().min(1).describe("Search query"),
       }),
     },
   )
@@ -111,14 +121,24 @@ const app = new Elysia()
       return job;
     },
     {
+      detail: {
+        summary: "Get recipe job",
+        description:
+          "Retrieves the current status and details of a recipe processing job by its ID. Returns job information including status (pending, processing, completed, failed), creation time, and any associated recipe data when available.",
+      },
       params: z.object({
-        "job-id": z.coerce.number(),
+        "job-id": z.coerce.number().describe("Recipe job ID"),
       }),
     },
   )
   .get("/recipe/:recipe-id", () => {}, {
+    detail: {
+      summary: "Get recipe",
+      description:
+        "Retrieves a complete recipe by its unique ID. Returns the full recipe data including ingredients, instructions, metadata, and any associated processing information.",
+    },
     params: z.object({
-      "recipe-id": z.coerce.number(),
+      "recipe-id": z.coerce.number().describe("Recipe ID"),
     }),
   })
   .listen(6969);

@@ -38,8 +38,8 @@ export const youtubeShortsRecipeSchema = z
   });
 
 export const inputRecipeSchema = z.object({
-  type: z.literal("youtube-shorts"),
-  data: z.record(z.string(), z.unknown()),
+  type: z.literal("youtube-shorts").describe("Recipe type"),
+  data: z.record(z.string(), z.unknown()).describe("Recipe data"),
 });
 
 export type InputRecipeSchema = z.infer<typeof inputRecipeSchema>;
