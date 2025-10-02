@@ -36,7 +36,6 @@ async function saveContentItem(
   });
 }
 
-
 export async function processRecipeJob(
   jobId: number,
   videoId: string,
@@ -58,17 +57,21 @@ export async function processRecipeJob(
 
   let instructions: string | null = null;
   let parsedRecipe: ParsedRecipe | null = null;
-  let embedding: number[] = [];
+  let embedding: number[] | null = null;
 
   for (const step of recipeJob.steps) {
     await db
-    .update(job_step_schema)
-    .set({
-      status: "processing",
-      started_at: sql`now()`,
-    })
-    .where(eq(job_step_schema.id, step.id));
+      .update(job_step_schema)
+      .set({
+        status: "processing",
+        started_at: sql`now()`,
+      })
+      .where(eq(job_step_schema.id, step.id));
 
+    /**
+     * TODO (anikait) - understand how the intermediate values can be saved
+     * to the database (content_items)
+     */
     try {
       switch (step.type) {
         case "extract_instructions": {
@@ -81,7 +84,7 @@ export async function processRecipeJob(
           break;
         }
         case "create_embeddings": {
-          ensureDefined(parsedRecipe, "Recipe structure not available")
+          ensureDefined(parsedRecipe, "Recipe structure not available");
           embedding = await LlmService.generateRecipeEmbedding(parsedRecipe);
           break;
         }
@@ -100,14 +103,14 @@ export async function processRecipeJob(
       /**
        * Failure of any one step in the job would lead to both the job step failure
        * and the job failure.
-       * 
+       *
        * TODO (anikait): maybe it would be better to pass the `updated_at` value,
        * otherwise the two values might differ a bit and could cause confusion when
        * looking at db
        */
       await db.transaction(async (txn) => {
         await Promise.all([
-          db
+          txn
             .update(job_step_schema)
             .set({
               status: "failed",
@@ -115,10 +118,10 @@ export async function processRecipeJob(
               updated_at: sql`now()`,
             })
             .where(eq(job_step_schema.id, step.id)),
-          db
+          txn
             .update(recipe_job_schema)
             .set({
-              status: "faied",
+              status: "failed",
               updated_at: sql`now()`,
               /**
                * This error message would be exposed outside of the application,
@@ -131,7 +134,7 @@ export async function processRecipeJob(
       });
 
       /**
-       * DO NOT REMOVE: this break ensures that in case of error
+       * DO NOT REMOVE: this return ensures that in case of error
        * the processing of job is terminated. Code after this
        * point assumes all the steps were successful
        */
@@ -139,20 +142,47 @@ export async function processRecipeJob(
     }
 
     await db
-    .update(job_step_schema)
-    .set({
-      status: "completed",
-      updated_at: sql`now()`,
-      completed_at: sql`now()`,
-    })
-    .where(eq(job_step_schema.id, step.id));
+      .update(job_step_schema)
+      .set({
+        status: "completed",
+        updated_at: sql`now()`,
+        completed_at: sql`now()`,
+      })
+      .where(eq(job_step_schema.id, step.id));
   }
 
   ensureDefined(parsedRecipe);
   ensureDefined(embedding);
 
-  // TODO: store the parsed recipe in db
-  // TODO: store embeddings in db
+  await db.transaction(async (txn) => {
+    const [recipe] = await txn
+      .insert(recipe_schema)
+      .values({
+        recipe_source_id: recipeJob.source.id,
+        name: parsedRecipe.name,
+        instructions: parsedRecipe.instructions,
+        ingredients: parsedRecipe.ingredients,
+        tags: parsedRecipe.tags,
+      })
+      .returning();
+    ensureDefined(recipe);
+
+    await Promise.all([
+      txn.insert(embedding_schema).values({
+        recipe_id: recipe.id,
+        type: "text",
+        data: embedding,
+      }),
+      txn
+        .update(recipe_job_schema)
+        .set({
+          status: "completed",
+          completed_at: sql`now()`,
+          updated_at: sql`now()`,
+        })
+        .where(eq(recipe_job_schema.id, jobId)),
+    ]);
+  });
 }
 
 export async function getRecipeJob(
@@ -162,44 +192,47 @@ export async function getRecipeJob(
   const [job] = await db
     .select({
       id: recipe_job_schema.id,
-      recipe_source_id: recipe_job_schema.recipe_source_id,
       status: recipe_job_schema.status,
       created_at: recipe_job_schema.created_at,
       started_at: recipe_job_schema.started_at,
       completed_at: recipe_job_schema.completed_at,
       error_message: recipe_job_schema.error_message,
+      source: {
+        id: recipe_source_schema.id,
+        external_id: recipe_source_schema.external_id,
+        type: recipe_source_schema.type,
+      },
+      steps: sql<
+        {
+          id: number;
+          type: string;
+          status: string;
+          error_message: string | null;
+        }[]
+      >`
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', ${job_step_schema.id},
+              'type', ${job_step_schema.type},
+              'status', ${job_step_schema.status},
+              'error_message', ${job_step_schema.error_message}
+            ) ORDER BY ${job_step_schema.order}
+          ), '[]'::json
+        )
+      `,
     })
     .from(recipe_job_schema)
+    .innerJoin(
+      recipe_source_schema,
+      eq(recipe_job_schema.recipe_source_id, recipe_source_schema.id),
+    )
+    .leftJoin(job_step_schema, eq(recipe_job_schema.id, job_step_schema.job_id))
     .where(eq(recipe_job_schema.id, jobId))
-    .limit(1);
+    .groupBy(recipe_job_schema.id);
 
   if (!job) return null;
-
-  const steps = await db
-    .select({
-      id: job_step_schema.id,
-      type: job_step_schema.type,
-      status: job_step_schema.status,
-      error_message: job_step_schema.error_message,
-    })
-    .from(job_step_schema)
-    .where(eq(job_step_schema.job_id, jobId))
-    .orderBy(job_step_schema.order);
-
-  return {
-    id: job.id,
-    status: job.status,
-    created_at: job.created_at,
-    started_at: job.started_at,
-    completed_at: job.completed_at,
-    error_message: job.error_message,
-    steps: steps.map((step) => ({
-      id: step.id,
-      type: step.type,
-      status: step.status,
-      error_message: step.error_message,
-    })),
-  };
+  return job;
 }
 
 export async function createRecipeJob(
@@ -240,7 +273,11 @@ export async function createRecipeJob(
 
     return {
       id: recipeJob.id,
-      recipe_source_id: recipeSource.id,
+      source: {
+        id: recipeSource.id,
+        external_id: recipeSource.external_id,
+        type: recipeSource.type,
+      },
       status: recipeJob.status,
       created_at: recipeJob.created_at,
       started_at: recipeJob.started_at,

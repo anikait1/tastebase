@@ -27,7 +27,7 @@ export const RecipeParsedSchema = z
     ingredients: z.array(
       z.object({
         name: z.string().transform((value) => value.trim().toLowerCase()),
-        quantity: z.string().nullish(),
+        quantity: z.string().nullable(),
       }),
     ),
     tags: z.array(z.string().transform((value) => value.trim().toLowerCase())),
@@ -35,7 +35,7 @@ export const RecipeParsedSchema = z
   .strict()
   .transform((data) => {
     const seenIngredientNames = new Set<string>();
-    const ingredients: { name: string; quantity?: string | null }[] = [];
+    const ingredients: { name: string; quantity: string | null }[] = [];
 
     for (const ingredient of data.ingredients) {
       if (seenIngredientNames.has(ingredient.name)) continue;

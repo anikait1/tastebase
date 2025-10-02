@@ -1,6 +1,12 @@
+export type RecipeSource = {
+  id: number;
+  external_id: string;
+  type: string;
+};
+
 export type Ingredient = {
   name: string;
-  quantity: number;
+  quantity: string | null;
 };
 
 export type Recipe = {
@@ -13,6 +19,7 @@ export type Recipe = {
 
 export type RecipeJob = {
   id: number;
+  source: RecipeSource;
   status: string;
   created_at: Date;
   started_at: Date | null;
