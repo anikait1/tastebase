@@ -229,7 +229,7 @@ export async function getRecipeJob(
     )
     .leftJoin(job_step_schema, eq(recipe_job_schema.id, job_step_schema.job_id))
     .where(eq(recipe_job_schema.id, jobId))
-    .groupBy(recipe_job_schema.id);
+    .groupBy(recipe_job_schema.id, recipe_source_schema.id);
 
   if (!job) return null;
   return job;
