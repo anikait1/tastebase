@@ -202,6 +202,9 @@ export async function getRecipeJob(
         external_id: recipe_source_schema.external_id,
         type: recipe_source_schema.type,
       },
+      /**
+       * TODO: check if the query can be improved
+       */
       steps: sql<
         {
           id: number;
