@@ -76,6 +76,5 @@ export const content_item_schema = pgTable("content_items", {
     .references(() => job_step_schema.id)
     .notNull(),
   content: jsonb("content").notNull(),
-  sequence: integer("sequence"),
   metadata: jsonb("metadata"),
 });
