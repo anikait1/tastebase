@@ -50,20 +50,5 @@ export const RecipeParsedSchema = z
   });
 
 export type ParsedRecipe = z.infer<typeof RecipeParsedSchema>;
+export type RawRecipe = z.infer<typeof RecipeRawSchema>;
 
-export const RecipeParseStatus = {
-  SUCCESS: "success",
-  FAILURE: "failure",
-} as const;
-
-export type RecipeParseSuccess = {
-  status: "success";
-  data: ParsedRecipe;
-};
-
-export type RecipeParseFailure = {
-  status: "failure";
-  error: { reason: string };
-};
-
-export type RecipeParseResult = RecipeParseSuccess | RecipeParseFailure;

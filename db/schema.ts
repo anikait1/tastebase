@@ -8,7 +8,6 @@ import {
   integer,
   timestamp,
 } from "drizzle-orm/pg-core";
-import type { YoutubeShortRecipePipeline } from "../recipe/job";
 
 export const recipe_source_schema = pgTable("recipe_sources", {
   id: serial("id").primaryKey(),
@@ -46,15 +45,34 @@ export const recipe_job_schema = pgTable("recipe_jobs", {
     .references(() => recipe_source_schema.id)
     .notNull()
     .unique(),
-  // created, processing, failed, success
   status: text("status").notNull().default("created"),
-  steps: jsonb("steps")
-    .notNull()
-    .default([])
-    .$type<YoutubeShortRecipePipeline>(),
-  current_step_index: integer("current_step_index"),
+  created_at: timestamp("created_at").notNull().default(sql`now()`),
   started_at: timestamp("started_at"),
   updated_at: timestamp("updated_at"),
   completed_at: timestamp("completed_at"),
   error_message: text("error_message"),
+});
+
+export const job_step_schema = pgTable("job_steps", {
+  id: serial("id").primaryKey(),
+  job_id: integer("job_id")
+    .references(() => recipe_job_schema.id)
+    .notNull(),
+  step_type: text("step_type").notNull(),
+  step_order: integer("step_order").notNull(),
+  status: text("status").notNull().default("created"),
+  error_message: text("error_message"),
+  started_at: timestamp("started_at"),
+  completed_at: timestamp("completed_at"),
+  metadata: jsonb("metadata"),
+});
+
+export const content_item_schema = pgTable("content_items", {
+  id: serial("id").primaryKey(),
+  job_step_id: integer("job_step_id")
+    .references(() => job_step_schema.id)
+    .notNull(),
+  content: jsonb("content").notNull(),
+  sequence: integer("sequence"),
+  metadata: jsonb("metadata"),
 });
