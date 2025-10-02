@@ -1,204 +1,181 @@
-import type { EmbedResult } from "ai";
-import type { ParsedRecipe } from "../llm/schema";
+import { sql, eq, and } from "drizzle-orm";
+import type { AppLogger } from "../logger";
+import {
+  content_item_schema,
+  job_step_schema,
+  recipe_job_schema,
+  recipe_schema,
+  embedding_schema,
+  recipe_source_schema,
+} from "../db/schema";
+import type { Database } from "../db";
 import * as YoutubeService from "../youtube/service";
 import * as LlmService from "../llm/service";
-import type { Database } from "../db";
-import { recipe_job_schema } from "../db/schema";
-import { eq, sql } from "drizzle-orm";
-import type { AppLogger } from "../logger";
+import type { ParsedRecipe } from "../llm/schema";
+import type { InputRecipeSchema } from "./schema";
+import { ensureDefined } from "../utils";
+import type { RecipeJob } from "./type";
 
-/**
- * Below is the definition of when a step is considered as
- * success, failure or skipped
- *
- * 1. success: only data key is present
- * 2. failure: only error key is present
- * 3. skipped: only the step name is there, both data and error is missing
- */
-export type RecipeJobStep<
-  Step extends string,
-  Data,
-  FailureMetadata = unknown,
-> =
-  | { name: Step; data: Data; error?: never }
-  | { name: Step; data?: never; error: string; metadata?: FailureMetadata }
-  | { name: Step; data?: never; error?: never };
+type StepType = "extract_instructions" | "parse_recipe" | "create_embeddings";
 
-export type YoutubeShortRecipePipeline = [
-  RecipeJobStep<"instructions", string>,
-  RecipeJobStep<"llm-parse", ParsedRecipe>,
-  RecipeJobStep<"embeddings", EmbedResult<string>["embedding"]>,
+
+const YOUTUBE_SHORT_RECIPE_JOB_STEPS: { type: StepType; order: number }[] = [
+  { type: "extract_instructions", order: 0 },
+  { type: "parse_recipe", order: 1 },
+  { type: "create_embeddings", order: 2 },
 ];
 
-async function runStep<T, P extends unknown[]>(
-  step: RecipeJobStep<string, unknown, unknown>,
-  logger: AppLogger,
-  fn: (...args: P) => Promise<T>,
-  ...args: P
-): Promise<T | null> {
-  const startedAt = performance.now();
-  logger.debug({ step: step.name }, "Job step started");
-
-  try {
-    const result = await fn(...args);
-    step.data = result;
-
-    logger.info(
-      {
-        step: step.name,
-        durationMs: performance.now() - startedAt,
-      },
-      "Job step completed",
-    );
-
-    return result;
-  } catch (error) {
-    step.error = error instanceof Error ? error.message : `${error}`;
-
-    logger.error(
-      {
-        step: step.name,
-        durationMs: performance.now() - startedAt,
-        err: error,
-      },
-      "Job step failed",
-    );
-
-    return null;
-  }
+async function markJobFailed(
+  db: Database,
+  jobId: number,
+  message: string,
+): Promise<void> {
+  await db
+    .update(recipe_job_schema)
+    .set({ status: "failed", error_message: message, updated_at: sql`now()` })
+    .where(eq(recipe_job_schema.id, jobId));
 }
 
-/**
- * TODO(anikait): A better of handling this job processing
- * exists for sure. Need to figure out how will different pieces
- * fit in together and then refactor the flow here
- *
- * The logger passed to this function already has the
- * bindings set for videoId and jobId, no need to set those
- * bindings in here
- */
-export async function youtubeShortRecipeProcessor(
-  videoId: string,
+
+async function markJobStepAsProcessing(jobId: number, stepId: number, db: Database) {
+  await db.update(job_step_schema).set({
+    status: 'processing',
+    started_at: sql`now()`
+  })
+}
+
+async function runStep() {
+
+}
+
+export async function processRecipeJob(
   jobId: number,
+  videoId: string,
   db: Database,
   logger: AppLogger,
-): Promise<YoutubeShortRecipePipeline> {
-  logger.info("Starting youtube shorts recipe pipeline");
-
+): Promise<void> {
+  const scoppedLogger = logger.child({ jobId, scope: "recipe-job" });
   await db
     .update(recipe_job_schema)
     .set({
       status: "processing",
-      current_step_index: 0,
-      started_at: sql`NOW()`,
-      updated_at: sql`NOW()`,
+      started_at: sql`now()`,
+      updated_at: sql`now()`,
     })
     .where(eq(recipe_job_schema.id, jobId));
-  logger.debug({ stepIndex: 0 }, "Advancing to recipe instructions step");
 
-  const pipeline: YoutubeShortRecipePipeline = [
-    { name: "instructions" },
-    { name: "llm-parse" },
-    { name: "embeddings" },
-  ];
+  const recipeJob = await getRecipeJob(jobId, db);
+  ensureDefined(recipeJob);
 
-  const markFailure = async (message: string) => {
-    await db
-      .update(recipe_job_schema)
-      .set({
-        status: "failed",
-        steps: pipeline,
-        error_message: message,
-        updated_at: sql`NOW()`,
-      })
-      .where(eq(recipe_job_schema.id, jobId));
+  for (const step of recipeJob.steps) {
+    await markJobStepAsProcessing(
+      jobId,
+      step.id,
+      db
+    )
 
-    logger.error({ message }, "Recipe job marked as failed");
-  };
+    scoppedLogger.info({ step: step.type }, "Running job step");
+    try {
+      switch (step.type) {
+        case 'extract_instructions': {
+          const youtubeTranscript = await YoutubeService.getTranscript(videoId);
+        }
+      }
+    } catch (err) {
 
-  const transcript = await runStep(
-    pipeline[0],
-    logger,
-    YoutubeService.getTranscript,
-    videoId,
-  );
-  if (!transcript) {
-    await markFailure(
-      "Unable to generate the transcript for the provided video",
-    );
-    return pipeline;
+    }
   }
 
-  await db
-    .update(recipe_job_schema)
-    .set({
-      steps: pipeline,
-      current_step_index: 1,
-      updated_at: sql`NOW()`,
-    })
-    .where(eq(recipe_job_schema.id, jobId));
-
-  logger.debug({ stepIndex: 1 }, "Advancing to recipe parsing step");
-
-  const recipe = await runStep(
-    pipeline[1],
-    logger,
-    LlmService.parseRecipe,
-    transcript,
-  );
-  if (!recipe) {
-    await markFailure("Unable to parse the recipe instructions");
-    return pipeline;
-  }
-
-  await db
-    .update(recipe_job_schema)
-    .set({
-      steps: pipeline,
-      current_step_index: 2,
-      updated_at: sql`NOW()`,
-    })
-    .where(eq(recipe_job_schema.id, jobId));
-
-  logger.debug({ stepIndex: 2 }, "Advancing to embedding generation step");
-
-  const embeddings = await runStep(
-    pipeline[2],
-    logger,
-    LlmService.generateRecipeEmbedding,
-    recipe,
-  );
-  if (!embeddings) {
-    await markFailure(
-      "Unable to generate data required to make the recipe searchable",
-    );
-    return pipeline;
-  }
-
-  await db
-    .update(recipe_job_schema)
-    .set({
-      status: "success",
-      steps: pipeline,
-      updated_at: sql`NOW()`,
-      completed_at: sql`NOW()`,
-    })
-    .where(eq(recipe_job_schema.id, jobId));
-
-  logger.info("Recipe job pipeline completed successfully");
-
-  return pipeline;
 }
 
 export async function getRecipeJob(
   jobId: number,
   db: Database,
-): Promise<typeof recipe_job_schema.$inferSelect | null> {
+): Promise<RecipeJob | null> {
   const [job] = await db
     .select()
     .from(recipe_job_schema)
-    .where(eq(recipe_job_schema.id, jobId));
+    .where(eq(recipe_job_schema.id, jobId))
+    .limit(1);
+
   if (!job) return null;
 
-  return job;
+  const steps = await db
+    .select({
+      id: job_step_schema.id,
+      type: job_step_schema.type,
+      status: job_step_schema.status,
+      error_message: job_step_schema.error_message,
+    })
+    .from(job_step_schema)
+    .where(eq(job_step_schema.job_id, jobId))
+    .orderBy(job_step_schema.order);
+
+  return {
+    id: job.id,
+    status: job.status,
+    created_at: job.created_at,
+    started_at: job.started_at,
+    completed_at: job.completed_at,
+    error_message: job.error_message,
+    steps: steps.map((step) => ({
+      id: step.id,
+      type: step.type,
+      status: step.status,
+      error_message: step.error_message,
+    })),
+  };
+}
+
+export async function createRecipeJob(
+  sourceType: InputRecipeSchema["type"],
+  externalId: string,
+  db: Database,
+): Promise<RecipeJob> {
+  return await db.transaction(async (txn) => {
+    const [recipeSource] = await txn
+      .insert(recipe_source_schema)
+      .values({
+        external_id: externalId,
+        type: sourceType,
+      })
+      .returning();
+
+    ensureDefined(recipeSource);
+
+    const [recipeJob] = await txn
+      .insert(recipe_job_schema)
+      .values({
+        recipe_source_id: recipeSource.id,
+      })
+      .returning();
+
+    ensureDefined(recipeJob);
+
+    const steps = await txn
+      .insert(job_step_schema)
+      .values(
+        YOUTUBE_SHORT_RECIPE_JOB_STEPS.map((step) => ({
+          job_id: recipeJob.id,
+          type: step.type,
+          order: step.order,
+        })),
+      )
+      .returning();
+
+    return {
+      id: recipeJob.id,
+      status: recipeJob.status,
+      created_at: recipeJob.created_at,
+      started_at: recipeJob.started_at,
+      completed_at: recipeJob.completed_at,
+      error_message: recipeJob.error_message,
+      steps: steps.map((step) => ({
+        id: step.id,
+        type: step.type,
+        status: step.status,
+        error_message: step.error_message,
+      })),
+    };
+  });
 }

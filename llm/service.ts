@@ -79,7 +79,10 @@ export async function generateRecipeEmbedding(
     return embedding;
   } catch (error) {
     const options = error instanceof Error ? { cause: error } : undefined;
-    throw new LlmEmbeddingError("Failed to generate recipe embedding.", options);
+    throw new LlmEmbeddingError(
+      "Failed to generate recipe embedding.",
+      options,
+    );
   }
 }
 

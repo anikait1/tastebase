@@ -7,8 +7,6 @@ import {
   recipe_job_schema,
 } from "../db/schema";
 
-import { strict as assert } from "node:assert";
-
 import type { Database } from "../db";
 
 import * as RecipeJobService from "./job";
@@ -16,6 +14,8 @@ import * as LlmService from "../llm/service";
 import * as z from "zod";
 import type { ZodError } from "zod";
 import type { AppLogger } from "../logger";
+import type { Recipe, RecipeJob } from "./type";
+import { ensureDefined } from "../utils";
 
 function getExternalIdBySourceType(
   sourceType: "youtube-shorts",
@@ -27,25 +27,17 @@ function getExternalIdBySourceType(
   }
 }
 
-function ensureDefined<T>(
-  value: T,
-  message?: string,
-): asserts value is NonNullable<T> {
-  assert.notEqual(value, undefined, message);
-  assert.notEqual(value, null, message);
-}
-
 type ProcessRecipeResult =
   | { type: "validation-error"; error: ZodError }
   | { type: "recipe-already-exists-error" }
-  | { type: "job-created"; job: typeof recipe_job_schema.$inferSelect };
+  | { type: "job-created"; job: RecipeJob };
 
 export async function processRecipeFromSource(
   schema: InputRecipeSchema,
   db: Database,
   logger: AppLogger,
 ): Promise<ProcessRecipeResult> {
-  const scopedLog = logger.child({
+  const scopedLogger = logger.child({
     scope: "recipe-service",
     source: schema.type,
   });
@@ -54,7 +46,7 @@ export async function processRecipeFromSource(
     case "youtube-shorts": {
       const parsedSource = youtubeShortsRecipeSchema.safeParse(schema.data);
       if (parsedSource.error) {
-        scopedLog.warn(
+        scopedLogger.warn(
           {
             validationIssues: z.prettifyError(parsedSource.error),
           },
@@ -65,66 +57,23 @@ export async function processRecipeFromSource(
       }
 
       const { id: videoId } = parsedSource.data;
-      scopedLog.setBindings({ videoId });
-      scopedLog.info("Processing recipe source");
+      scopedLogger.setBindings({ videoId });
+      scopedLogger.info("Processing recipe source");
 
       const externalId = getExternalIdBySourceType(schema.type, videoId);
-      const [existingRecipe] = await db
-        .select({
-          recipe: {
-            id: recipe_schema.id,
-            name: recipe_schema.name,
-            instructions: recipe_schema.instructions,
-            tags: recipe_schema.tags,
-            ingredients: recipe_schema.ingredients,
-          },
-          source: {
-            type: recipe_source_schema.type,
-          },
-        })
-        .from(recipe_schema)
-        .innerJoin(
-          recipe_source_schema,
-          and(
-            eq(recipe_schema.recipe_source_id, recipe_source_schema.id),
-            eq(recipe_source_schema.external_id, externalId),
-          ),
-        );
+      const existingRecipe = await getRecipeByExternalId(externalId, db);
 
       if (existingRecipe) {
-        scopedLog.info(
-          { recipeId: existingRecipe.recipe.id, externalId },
+        scopedLogger.info(
+          { recipeId: existingRecipe.id, externalId },
           "Recipe already exists for source",
         );
         return { type: "recipe-already-exists-error" };
       }
 
-      scopedLog.info({ externalId }, "Creating recipe job");
-      const recipeJob = await db.transaction(
-        async function createRecipeJob(txn) {
-          const [recipeSource] = await txn
-            .insert(recipe_source_schema)
-            .values({
-              external_id: externalId,
-              type: schema.type,
-            })
-            .returning();
-
-          ensureDefined(recipeSource);
-
-          const [recipeJob] = await txn
-            .insert(recipe_job_schema)
-            .values({
-              recipe_source_id: recipeSource.id,
-            })
-            .returning();
-
-          ensureDefined(recipeJob);
-          return recipeJob;
-        },
-      );
-      scopedLog.info({ jobId: recipeJob.id }, "Recipe job created");
-      scopedLog.setBindings({ jobId: recipeJob.id });
+      scopedLogger.info({ externalId }, "Creating recipe job");
+      const recipeJob = await RecipeJobService.createRecipeJob(schema.type, externalId, db);
+      scopedLogger.info({ jobId: recipeJob.id }, "Recipe job created");
 
       /**
        * TODO (anikait) - Move this function to a separate worker
@@ -133,54 +82,14 @@ export async function processRecipeFromSource(
        */
       setImmediate(async function runRecipeJob(db) {
         try {
-          const pipeline = await RecipeJobService.youtubeShortRecipeProcessor(
-            videoId,
+          await RecipeJobService.processRecipeJob(
             recipeJob.id,
+            videoId,
             db,
-            scopedLog,
+            scopedLogger,
           );
-          const parsedRecipe = pipeline[1].data;
-          const generatedEmbeddings = pipeline[2].data;
-
-          if (!parsedRecipe || !generatedEmbeddings) {
-            scopedLog.error(
-              {
-                failedSteps: pipeline
-                  .filter((step) => step.error)
-                  .map((step) => ({ name: step.name, error: step.error })),
-              },
-              "Recipe pipeline failed to generate required data",
-            );
-            return;
-          }
-
-          await db.transaction(async function createRecipe(txn) {
-            const [recipe] = await txn
-              .insert(recipe_schema)
-              .values({
-                recipe_source_id: recipeJob.recipe_source_id,
-                name: parsedRecipe.name,
-                instructions: parsedRecipe.instructions,
-                tags: parsedRecipe.tags,
-                ingredients: parsedRecipe.ingredients,
-              })
-              .returning();
-
-            ensureDefined(recipe);
-
-            await txn.insert(embedding_schema).values({
-              recipe_id: recipe.id,
-              type: "text",
-              data: generatedEmbeddings,
-            });
-
-            scopedLog.info(
-              { recipeId: recipe.id },
-              "Recipe persisted from processed job",
-            );
-          });
         } catch (err) {
-          scopedLog.error(
+          scopedLogger.error(
             { err },
             "Recipe job execution failed with an unknown error",
           );
@@ -224,4 +133,29 @@ export async function searchRecipes(query: string, db: Database) {
     .from(embedding_schema)
     .innerJoin(recipe_schema, eq(embedding_schema.recipe_id, recipe_schema.id))
     .orderBy(desc(finalScore));
+}
+
+async function getRecipeByExternalId(
+  externalId: string,
+  db: Database,
+): Promise<Recipe | null> {
+  const [recipe] = await db
+    .select({
+      id: recipe_schema.id,
+      name: recipe_schema.name,
+      instructions: recipe_schema.instructions,
+      tags: recipe_schema.tags,
+      ingredients: recipe_schema.ingredients,
+    })
+    .from(recipe_schema)
+    .innerJoin(
+      recipe_source_schema,
+      and(
+        eq(recipe_schema.recipe_source_id, recipe_source_schema.id),
+        eq(recipe_source_schema.external_id, externalId),
+      ),
+    );
+
+  if (!recipe) return null;
+  return recipe;
 }
