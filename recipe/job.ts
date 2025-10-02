@@ -18,35 +18,24 @@ import type { RecipeJob } from "./type";
 
 type StepType = "extract_instructions" | "parse_recipe" | "create_embeddings";
 
-
 const YOUTUBE_SHORT_RECIPE_JOB_STEPS: { type: StepType; order: number }[] = [
   { type: "extract_instructions", order: 0 },
   { type: "parse_recipe", order: 1 },
   { type: "create_embeddings", order: 2 },
 ];
 
-async function markJobFailed(
+async function saveContentItem(
+  jobStepId: number,
+  type: string,
+  data: any,
   db: Database,
-  jobId: number,
-  message: string,
 ): Promise<void> {
-  await db
-    .update(recipe_job_schema)
-    .set({ status: "failed", error_message: message, updated_at: sql`now()` })
-    .where(eq(recipe_job_schema.id, jobId));
+  await db.insert(content_item_schema).values({
+    job_step_id: jobStepId,
+    content: { type, data },
+  });
 }
 
-
-async function markJobStepAsProcessing(jobId: number, stepId: number, db: Database) {
-  await db.update(job_step_schema).set({
-    status: 'processing',
-    started_at: sql`now()`
-  })
-}
-
-async function runStep() {
-
-}
 
 export async function processRecipeJob(
   jobId: number,
@@ -67,25 +56,103 @@ export async function processRecipeJob(
   const recipeJob = await getRecipeJob(jobId, db);
   ensureDefined(recipeJob);
 
-  for (const step of recipeJob.steps) {
-    await markJobStepAsProcessing(
-      jobId,
-      step.id,
-      db
-    )
+  let instructions: string | null = null;
+  let parsedRecipe: ParsedRecipe | null = null;
+  let embedding: number[] = [];
 
-    scoppedLogger.info({ step: step.type }, "Running job step");
+  for (const step of recipeJob.steps) {
+    await db
+    .update(job_step_schema)
+    .set({
+      status: "processing",
+      started_at: sql`now()`,
+    })
+    .where(eq(job_step_schema.id, step.id));
+
     try {
       switch (step.type) {
-        case 'extract_instructions': {
-          const youtubeTranscript = await YoutubeService.getTranscript(videoId);
+        case "extract_instructions": {
+          instructions = await YoutubeService.getTranscript(videoId);
+          break;
+        }
+        case "parse_recipe": {
+          ensureDefined(instructions, "Recipe instructions is not populated");
+          parsedRecipe = await LlmService.parseRecipe(instructions);
+          break;
+        }
+        case "create_embeddings": {
+          ensureDefined(parsedRecipe, "Recipe structure not available")
+          embedding = await LlmService.generateRecipeEmbedding(parsedRecipe);
+          break;
         }
       }
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : `${err}`;
+      scoppedLogger.error(
+        {
+          stepId: step.id,
+          stepTyoe: step.type,
+          error: errorMessage,
+        },
+        "Recip job step failed",
+      );
 
+      /**
+       * Failure of any one step in the job would lead to both the job step failure
+       * and the job failure.
+       * 
+       * TODO (anikait): maybe it would be better to pass the `updated_at` value,
+       * otherwise the two values might differ a bit and could cause confusion when
+       * looking at db
+       */
+      await db.transaction(async (txn) => {
+        await Promise.all([
+          db
+            .update(job_step_schema)
+            .set({
+              status: "failed",
+              error_message: errorMessage,
+              updated_at: sql`now()`,
+            })
+            .where(eq(job_step_schema.id, step.id)),
+          db
+            .update(recipe_job_schema)
+            .set({
+              status: "faied",
+              updated_at: sql`now()`,
+              /**
+               * This error message would be exposed outside of the application,
+               * so it needs to be decided what exactly would be set here
+               */
+              error_message: "TODO",
+            })
+            .where(eq(recipe_job_schema.id, jobId)),
+        ]);
+      });
+
+      /**
+       * DO NOT REMOVE: this break ensures that in case of error
+       * the processing of job is terminated. Code after this
+       * point assumes all the steps were successful
+       */
+      return;
     }
+
+    await db
+    .update(job_step_schema)
+    .set({
+      status: "completed",
+      updated_at: sql`now()`,
+      completed_at: sql`now()`,
+    })
+    .where(eq(job_step_schema.id, step.id));
   }
 
+  ensureDefined(parsedRecipe);
+  ensureDefined(embedding);
+
+  // TODO: store the parsed recipe in db
+  // TODO: store embeddings in db
 }
 
 export async function getRecipeJob(
@@ -93,7 +160,15 @@ export async function getRecipeJob(
   db: Database,
 ): Promise<RecipeJob | null> {
   const [job] = await db
-    .select()
+    .select({
+      id: recipe_job_schema.id,
+      recipe_source_id: recipe_job_schema.recipe_source_id,
+      status: recipe_job_schema.status,
+      created_at: recipe_job_schema.created_at,
+      started_at: recipe_job_schema.started_at,
+      completed_at: recipe_job_schema.completed_at,
+      error_message: recipe_job_schema.error_message,
+    })
     .from(recipe_job_schema)
     .where(eq(recipe_job_schema.id, jobId))
     .limit(1);
@@ -165,6 +240,7 @@ export async function createRecipeJob(
 
     return {
       id: recipeJob.id,
+      recipe_source_id: recipeSource.id,
       status: recipeJob.status,
       created_at: recipeJob.created_at,
       started_at: recipeJob.started_at,

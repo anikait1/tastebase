@@ -67,6 +67,7 @@ export const job_step_schema = pgTable("job_steps", {
   error_message: text("error_message"),
   started_at: timestamp("started_at"),
   completed_at: timestamp("completed_at"),
+  updated_at: timestamp("updated_at"),
   metadata: jsonb("metadata"),
 });
 

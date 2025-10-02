@@ -17,13 +17,13 @@ export type RecipeJob = {
   created_at: Date;
   started_at: Date | null;
   completed_at: Date | null;
-  error_message: string  | null
-  steps: RecipeJobStep[]
-}
+  error_message: string | null;
+  steps: RecipeJobStep[];
+};
 
 export type RecipeJobStep = {
   id: number;
   type: string;
   status: string;
   error_message: string | null;
-}
+};

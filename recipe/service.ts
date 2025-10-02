@@ -72,7 +72,11 @@ export async function processRecipeFromSource(
       }
 
       scopedLogger.info({ externalId }, "Creating recipe job");
-      const recipeJob = await RecipeJobService.createRecipeJob(schema.type, externalId, db);
+      const recipeJob = await RecipeJobService.createRecipeJob(
+        schema.type,
+        externalId,
+        db,
+      );
       scopedLogger.info({ jobId: recipeJob.id }, "Recipe job created");
 
       /**
