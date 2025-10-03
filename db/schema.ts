@@ -7,18 +7,25 @@ import {
   vector,
   integer,
   timestamp,
+  unique
 } from "drizzle-orm/pg-core";
 import type { Ingredient } from "../recipe/type";
 
-export const recipe_source_schema = pgTable("recipe_sources", {
-  id: serial("id").primaryKey(),
-  type: text("type").notNull(),
-  external_id: text("external_id").notNull().unique(),
-  created_at: timestamp("created_at")
-    .notNull()
-    .default(sql`now()`),
-  metadata: jsonb("metadata"),
-});
+export const recipe_source_schema = pgTable(
+  "recipe_sources",
+  {
+    id: serial("id").primaryKey(),
+    type: text("type").notNull(),
+    external_id: text("external_id").notNull(),
+    created_at: timestamp("created_at")
+      .notNull()
+      .default(sql`now()`),
+    metadata: jsonb("metadata"),
+  },
+  (table) => ({
+    uniqueExternalIdType: unique().on(table.external_id, table.type),
+  })
+);
 
 export const recipe_schema = pgTable("recipes", {
   id: serial("id").primaryKey(),

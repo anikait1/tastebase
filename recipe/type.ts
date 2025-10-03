@@ -1,10 +1,25 @@
+import * as z from "zod";
 import type { ParsedRecipeLlm } from "../llm/schema";
+import type { Database } from "../db";
+import type { AppLogger } from "../logger";
 
 export type RecipeSource = {
   id: number;
   external_id: string;
   type: string;
 };
+
+export type PipelineContext = {
+  recipeSource: RecipeSource;
+  db: Database;
+  logger: AppLogger;
+  transcript?: string;
+  recipe?: ParsedRecipeLlm;
+};
+
+export type PipelineStep = (
+  ctx: PipelineContext,
+) => Promise<RecipePipelineEventType>;
 
 export type Ingredient = {
   name: string;
@@ -17,24 +32,6 @@ export type Recipe = {
   instructions: string;
   tags: string[];
   ingredients: Ingredient[];
-};
-
-export type RecipeJob = {
-  id: number;
-  source: RecipeSource;
-  status: string;
-  created_at: Date;
-  started_at: Date | null;
-  completed_at: Date | null;
-  error_message: string | null;
-  steps: RecipeJobStep[];
-};
-
-export type RecipeJobStep = {
-  id: number;
-  type: string;
-  status: string;
-  error_message: string | null;
 };
 
 export const RecipePipelineEventTypes = {
@@ -95,6 +92,32 @@ export class RecipeSavingFailed extends Error {
       params?.options,
     );
     this.name = "RecipeSavingFailed";
+  }
+}
+
+export class RecipeAlreadyExists extends Error {
+  public readonly type = "recipeAlreadyExists";
+  public readonly recipeId: number;
+  constructor(
+    recipeId: number,
+    params?: { message?: string; options?: ErrorOptions },
+  ) {
+    super(params?.message ?? "Recipe already exists", params?.options);
+    this.recipeId = recipeId;
+    this.name = "RecipeAlreadyExists";
+  }
+}
+
+export class RecipeInputValidationFailed extends Error {
+  public readonly type = "recipeInputValidationFailed";
+  public readonly data: z.ZodError;
+  constructor(
+    zodError: z.ZodError,
+    params?: { message?: string; options?: ErrorOptions },
+  ) {
+    super(params?.message ?? "Recipe validation failed", params?.options);
+    this.data = zodError;
+    this.name = "RecipeInputValidationFailed";
   }
 }
 

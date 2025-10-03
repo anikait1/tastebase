@@ -12,7 +12,7 @@ import {
   LlmInvocationError,
   LlmParseError,
   LlmRejectedError,
-} from "./errors";
+} from "./type";
 
 export async function parseRecipe(
   instructions: string,

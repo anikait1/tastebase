@@ -18,23 +18,25 @@ import {
   TranscriptGenerationFailed,
   type RecipePipelineEventType,
   type RecipeSource,
+  type PipelineContext,
+  type PipelineStep,
 } from "./type";
 import * as YoutubeService from "../youtube/service";
 import { ensureDefined } from "../utils";
 
-export async function* parseRecipePipeline(
-  recipeSource: RecipeSource,
-  db: Database,
-  logger: AppLogger,
-): AsyncGenerator<RecipePipelineEventType> {
-  const videoId = recipeSource.external_id;
-  const scopedLogger = logger.child({
-    scope: "recipe-pipeline",
-    videoId,
-  });
+const RecipePipeline: PipelineStep[] = [transcriptStep, recipeStep, saveStep];
 
-  const transcriptEvent = await YoutubeService.getTranscript(videoId)
-    .then((transcript) => new TranscriptGenerated(transcript))
+async function transcriptStep(
+  ctx: PipelineContext,
+): Promise<TranscriptGenerated | TranscriptGenerationFailed> {
+  const { recipeSource, db, logger } = ctx;
+  const videoId = recipeSource.external_id;
+
+  const event = await YoutubeService.getTranscript(videoId)
+    .then((transcript) => {
+      ctx.transcript = transcript;
+      return new TranscriptGenerated(transcript);
+    })
     .catch(
       (error) =>
         new TranscriptGenerationFailed({
@@ -42,33 +44,33 @@ export async function* parseRecipePipeline(
         }),
     );
 
-  scopedLogger.info(
-    { type: transcriptEvent.type },
-    "Completed transcript generation",
-  );
-  if (
-    RecipePipelineErrors.transcriptGenerationFailed === transcriptEvent.type
-  ) {
-    yield transcriptEvent;
-    return;
-  }
+  if (event.type === RecipePipelineErrors.transcriptGenerationFailed)
+    return event;
 
-  db.insert(content_item_schema)
+  await db
+    .insert(content_item_schema)
     .values({
       recipe_source_id: recipeSource.id,
-      pipeline_step: transcriptEvent.type,
-      data: { type: "string", content: transcriptEvent.data },
+      pipeline_step: event.type,
+      data: { type: "string", content: ctx.transcript! },
     })
     .catch((error) => {
-      logger.error("Failed to save generated transctipt");
+      logger.error({ error }, "Failed to save transcript");
     });
 
-  yield transcriptEvent;
+  return event;
+}
 
-  const generatedRecipeEvent = await LlmService.parseRecipe(
-    transcriptEvent.data,
-  )
-    .then((generatedRecipe) => new RecipeGenerated(generatedRecipe))
+async function recipeStep(
+  ctx: PipelineContext,
+): Promise<RecipeGenerated | RecipeGenerationFailed> {
+  const { logger } = ctx;
+
+  const event = await LlmService.parseRecipe(ctx.transcript!)
+    .then((recipe) => {
+      ctx.recipe = recipe;
+      return new RecipeGenerated(recipe);
+    })
     .catch(
       (error) =>
         new RecipeGenerationFailed({
@@ -76,31 +78,27 @@ export async function* parseRecipePipeline(
         }),
     );
 
-  scopedLogger.info(
-    { type: generatedRecipeEvent.type },
-    "Completed recipe generation",
-  );
-  if (
-    RecipePipelineErrors.recipeGenerationFailed === generatedRecipeEvent.type
-  ) {
-    yield generatedRecipeEvent;
-    return;
-  }
+  logger.info({ type: event.type }, "Completed recipe generation");
+  return event;
+}
 
-  yield generatedRecipeEvent;
+async function saveStep(
+  ctx: PipelineContext,
+): Promise<RecipeSaved | RecipeSavingFailed> {
+  const { recipeSource, db, logger } = ctx;
 
-  const generatedRecipe = generatedRecipeEvent.data;
-  const recipeSavedEvent = await LlmService.generateRecipeEmbedding(generatedRecipe)
-    .then((emdeddings) =>
+  ensureDefined(ctx.recipe);
+  const event = await LlmService.generateRecipeEmbedding(ctx.recipe)
+    .then((embeddings) =>
       db.transaction(async (txn) => {
         const [recipe] = await txn
           .insert(recipe_schema)
           .values({
             recipe_source_id: recipeSource.id,
-            name: generatedRecipe.name,
-            instructions: generatedRecipe.instructions,
-            ingredients: generatedRecipe.ingredients,
-            tags: generatedRecipe.tags,
+            name: ctx.recipe!.name,
+            instructions: ctx.recipe!.instructions,
+            ingredients: ctx.recipe!.ingredients,
+            tags: ctx.recipe!.tags,
           })
           .returning();
         ensureDefined(recipe, "Failed to persist recipe");
@@ -108,7 +106,7 @@ export async function* parseRecipePipeline(
         await txn.insert(embedding_schema).values({
           recipe_id: recipe.id,
           type: "text",
-          data: emdeddings,
+          data: embeddings,
         });
 
         return new RecipeSaved(recipe.id);
@@ -121,10 +119,28 @@ export async function* parseRecipePipeline(
         }),
     );
 
-    scopedLogger.info({
-      type: recipeSavedEvent.type
-    }, "Completed recipe persistence in database")
-  
-    yield recipeSavedEvent;
-    return;
+  logger.info({ type: event.type }, "Completed recipe persistence");
+  return event;
+}
+
+export async function* processRecipePipeline(
+  recipeSource: RecipeSource,
+  db: Database,
+  logger: AppLogger,
+  startFrom: number = 0,
+): AsyncGenerator<RecipePipelineEventType> {
+  const scopedLogger = logger.child({
+    scope: "recipe-pipeline",
+    videoId: recipeSource.external_id,
+  });
+  const ctx: PipelineContext = { recipeSource, db, logger: scopedLogger };
+
+  for (const step of RecipePipeline.slice(startFrom)) {
+    const event = await step(ctx);
+    yield event;
+
+    if (event.type in RecipePipelineErrors) {
+      return;
+    }
+  }
 }

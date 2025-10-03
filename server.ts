@@ -67,19 +67,41 @@ const app = new Elysia()
   )
   .post(
     "/recipe",
-    async ({ logger, body, status, db }) => {
-      const result = await RecipeService.processRecipeFromSource(
+    async function* createRecipe({ logger, body, status, db }) {
+      for await (const event of RecipeService.processRecipeFromSource(
         body,
         db,
         logger,
-      );
-      switch (result.type) {
-        case "validation-error":
-          return status("Bad Request", result.error.message);
-        case "recipe-already-exists-error":
-          return status("Conflict", "Recipe already exists");
-        case "job-created":
-          return result.job;
+      )) {
+        switch (event.type) {
+          case "recipeAlreadyExists": {
+            // TODO - finalize error object
+            return status(409);
+          }
+          case "recipeInputValidationFailed": {
+            // TODO - finalize error object
+            return status(422);
+          }
+          case "transcriptGenerated": {
+            yield event;
+            break;
+          }
+          case "recipeGenerated": {
+            yield event;
+            break;
+          }
+          case "recipeSaved": {
+            yield event;
+            break;
+          }
+          // TODO - finalize error object
+          case "transcriptGenerationFailed":
+          case "recipeGenerationFailed":
+          case "recipeSavingFailed": {
+            logger.error(event, "Something went wrong while creating recipe")
+            return status(500);
+          }
+        }
       }
     },
     {
@@ -105,29 +127,6 @@ const app = new Elysia()
       },
       query: z.object({
         q: z.string().min(1).describe("Search query"),
-      }),
-    },
-  )
-  .get(
-    "/recipe-job/:job-id",
-    async ({ params, db, logger }) => {
-      const job = await RecipeJobService.getRecipeJob(params["job-id"], db);
-      if (!job) {
-        logger.warn({ jobId: params["job-id"] }, "Recipe job not found");
-        return status("Not Found");
-      }
-
-      logger.debug({ jobId: job.id, status: job.status }, "Recipe job fetched");
-      return job;
-    },
-    {
-      detail: {
-        summary: "Get recipe job",
-        description:
-          "Retrieves the current status and details of a recipe processing job by its ID. Returns job information including status (pending, processing, completed, failed), creation time, and any associated recipe data when available.",
-      },
-      params: z.object({
-        "job-id": z.coerce.number().describe("Recipe job ID"),
       }),
     },
   )
