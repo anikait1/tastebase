@@ -67,6 +67,7 @@ export async function processRecipeJob(
         started_at: sql`now()`,
       })
       .where(eq(job_step_schema.id, step.id));
+    scoppedLogger.info({stepId: step.id, stepType: step.type}, "Processing recipe job step")
 
     /**
      * TODO (anikait) - understand how the intermediate values can be saved
@@ -97,7 +98,7 @@ export async function processRecipeJob(
           stepTyoe: step.type,
           error: errorMessage,
         },
-        "Recip job step failed",
+        "Recipe job step failed",
       );
 
       /**
@@ -149,6 +150,7 @@ export async function processRecipeJob(
         completed_at: sql`now()`,
       })
       .where(eq(job_step_schema.id, step.id));
+    scoppedLogger.info({stepId: step.id, stepType: step.type}, "Processed recipe job step")
   }
 
   ensureDefined(parsedRecipe);
@@ -251,7 +253,6 @@ export async function createRecipeJob(
         type: sourceType,
       })
       .returning();
-
     ensureDefined(recipeSource);
 
     const [recipeJob] = await txn
@@ -260,7 +261,6 @@ export async function createRecipeJob(
         recipe_source_id: recipeSource.id,
       })
       .returning();
-
     ensureDefined(recipeJob);
 
     const steps = await txn
