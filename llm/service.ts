@@ -4,8 +4,8 @@ import { openai } from "@ai-sdk/openai";
 import {
   RecipeParsedSchema,
   RecipeRawSchema,
-  type ParsedRecipe,
-  type RawRecipe,
+  type ParsedRecipeLlm,
+  type RawRecipeLlm,
 } from "./schema";
 import {
   LlmEmbeddingError,
@@ -14,8 +14,10 @@ import {
   LlmRejectedError,
 } from "./errors";
 
-export async function parseRecipe(instructions: string): Promise<ParsedRecipe> {
-  let result: RawRecipe;
+export async function parseRecipe(
+  instructions: string,
+): Promise<ParsedRecipeLlm> {
+  let result: RawRecipeLlm;
   try {
     ({ object: result } = await generateObject({
       model: openai("gpt-4o"),
@@ -53,7 +55,7 @@ export async function parseRecipe(instructions: string): Promise<ParsedRecipe> {
 }
 
 export async function generateRecipeEmbedding(
-  recipe: ParsedRecipe,
+  recipe: ParsedRecipeLlm,
 ): Promise<EmbedResult<string>["embedding"]> {
   const ingredientsText = recipe.ingredients
     .map((ingredient) =>

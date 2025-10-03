@@ -51,7 +51,7 @@ export const content_item_schema = pgTable("content_items", {
   recipe_source_id: integer("recipe_source_id")
     .references(() => recipe_source_schema.id)
     .notNull(),
-  stage: text("stage").notNull(),
+  pipeline_step: text("step").notNull(),
   data: jsonb("data").notNull(),
   created_at: timestamp("created_at")
     .notNull()

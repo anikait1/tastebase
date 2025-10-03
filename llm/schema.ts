@@ -49,5 +49,5 @@ export const RecipeParsedSchema = z
     return data;
   });
 
-export type ParsedRecipe = z.infer<typeof RecipeParsedSchema>;
-export type RawRecipe = z.infer<typeof RecipeRawSchema>;
+export type ParsedRecipeLlm = z.infer<typeof RecipeParsedSchema>;
+export type RawRecipeLlm = z.infer<typeof RecipeRawSchema>;
