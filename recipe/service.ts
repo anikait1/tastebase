@@ -21,6 +21,24 @@ import {
 } from "./type";
 import { ensureDefined } from "../utils";
 
+/**
+ * Validates input, enforces dedup by (external_id,type), persists a recipe_source,
+ * and delegates to the pipeline while streaming each event to the caller.
+ * Early‑exit on validation failure or existing recipe.
+ *
+ * Few key pieces that are missing here:
+ * 1. Determine the start step of recipe pipeline in case it failed earlier due to a recoverable error
+ * 2. Currently the pipeline may end up being in a "corrupt" state if a recipe source is created but
+ * the recipe is not stored, this is because recipe would not be found for the corresponding source but
+ * when the time comes to insert a recipe source it would fail because of the unique index. Few options
+ * exist to solve for this, need to brainstorm which one would be ideal
+ *   a. Restart the pipeline from desired step, check the corresponding tables to understand on which
+ *   step should the pipeline begin from.
+ *   b. Delete the recipe source in case of an error and always start the pipeline from scratch.
+ * 3. In error cases, currently no information is stored in db (transcript aside). To prevent abuse
+ * it would be better to either rate limit people or store referenes to failed attempts. Storing
+ * references might be tricky since people could still spam and abuse the system.
+ */
 export async function* processRecipeFromSource(
   schema: InputRecipeSchema,
   db: Database,
@@ -50,7 +68,11 @@ export async function* processRecipeFromSource(
   scopedLogger.setBindings({ externalId });
   scopedLogger.info("Processing recipe source");
 
-  const existingRecipe = await getRecipeByExternalId(externalId, sourceType, db);
+  const existingRecipe = await getRecipeByExternalId(
+    externalId,
+    sourceType,
+    db,
+  );
   if (existingRecipe) {
     scopedLogger.info(
       { recipeId: existingRecipe.id, externalId },
@@ -74,6 +96,20 @@ export async function* processRecipeFromSource(
   }
 }
 
+/**
+ * Hybrid search:
+ *  finalScore = 0.7 * (1 - cosineDistance(embedding, qEmb))
+ *             + 0.3 * ts_rank_cd(name,tags,ingredients)
+ * Returns recipes ordered by finalScore.
+ *
+ * TODO - Need to come up with the final approach here and how much importance
+ * should be given to search criteria. This would probably change as time
+ * goes by and more data is in the system to better understand the user
+ * queries.
+ *
+ * TODO - Add indexing across the columns being searched. This is a general
+ * theme across the codebase, no indexing has been done as of now.
+ */
 export async function searchRecipes(query: string, db: Database) {
   const queryEmbeddings = await LlmService.generateQueryEmbedding(query);
 

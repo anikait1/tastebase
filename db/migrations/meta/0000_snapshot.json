@@ -46,12 +46,8 @@
           "name": "content_items_recipe_source_id_recipe_sources_id_fk",
           "tableFrom": "content_items",
           "tableTo": "recipe_sources",
-          "columnsFrom": [
-            "recipe_source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["recipe_source_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -97,12 +93,8 @@
           "name": "embeddings_recipe_id_recipes_id_fk",
           "tableFrom": "embeddings",
           "tableTo": "recipes",
-          "columnsFrom": [
-            "recipe_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["recipe_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -168,12 +160,8 @@
           "name": "recipes_recipe_source_id_recipe_sources_id_fk",
           "tableFrom": "recipes",
           "tableTo": "recipe_sources",
-          "columnsFrom": [
-            "recipe_source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["recipe_source_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -227,10 +215,7 @@
         "recipe_sources_external_id_type_unique": {
           "name": "recipe_sources_external_id_type_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "external_id",
-            "type"
-          ]
+          "columns": ["external_id", "type"]
         }
       },
       "policies": {},

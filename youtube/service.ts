@@ -12,6 +12,19 @@ export async function init(): Promise<Innertube> {
   return client;
 }
 
+/**
+ * Retrieves transcript via youtubei.js. Some Shorts have no transcript panel
+ * and the client may throw InnerTubeError("Transcript panel not found"). Infact
+ * the library may also throw errors in case the video was not a valid one. Library
+ * errors are currently not converted to any error and are a responsibility of the
+ * caller.
+ *
+ * TODO: Error handling, the function assumes a very happy path and needs to be
+ * improved to handle the error cases, however right now I am not sure of the
+ * complete flow in cases of error, so leaving it for later as I discover the
+ * errors during dog fooding of the app and understanding how the UX can be
+ * shaped
+ */
 export async function getTranscript(videoId: string): Promise<string> {
   const videoInfo = await client.getInfo(videoId);
   /**

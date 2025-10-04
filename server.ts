@@ -10,7 +10,13 @@ import { baseLogger } from "./logger";
 
 const youtubeClient = await YoutubeService.init();
 
+/**
+ * HTTP server: attaches request-scoped metadata (id, startTime, logger) and
+ * exposes streaming POST /recipe that yields pipeline events. Errors are logged
+ * via onError and terminate the generator with an appropriate HTTP status.
+ */
 const app = new Elysia()
+  /** Attach/propagate a stable request id for traceability */
   .derive(function setRequestId({ set }) {
     let requestId = set.headers["x-request-id"];
     if (!requestId) {
@@ -20,9 +26,11 @@ const app = new Elysia()
 
     return { requestId };
   })
+  /** Capture start time for latency logging */
   .derive(function getRequestStartTime() {
     return { startTime: performance.now() };
   })
+  /** Create a request-scoped logger with consistent context */
   .derive(function setupRequestLogger({ requestId, request }) {
     const logger = baseLogger.child({
       scope: "http",
@@ -67,6 +75,12 @@ const app = new Elysia()
   )
   .post(
     "/recipe",
+    /**
+     * Streams recipe pipeline events back to the client as they complete.
+     * Contract:
+     *  - yields TranscriptGenerated → RecipeGenerated → RecipeSaved
+     *  - on validation/conflict returns 422/409; on pipeline errors returns 500.
+     */
     async function* createRecipe({ logger, body, status, db }) {
       for await (const event of RecipeService.processRecipeFromSource(
         body,
@@ -98,7 +112,7 @@ const app = new Elysia()
           case "transcriptGenerationFailed":
           case "recipeGenerationFailed":
           case "recipeSavingFailed": {
-            logger.error(event, "Something went wrong while creating recipe")
+            logger.error(event, "Something went wrong while creating recipe");
             return status(500);
           }
         }

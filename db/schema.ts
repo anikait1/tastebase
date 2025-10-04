@@ -7,7 +7,7 @@ import {
   vector,
   integer,
   timestamp,
-  unique
+  unique,
 } from "drizzle-orm/pg-core";
 import type { Ingredient } from "../recipe/type";
 
@@ -24,7 +24,7 @@ export const recipe_source_schema = pgTable(
   },
   (table) => ({
     uniqueExternalIdType: unique().on(table.external_id, table.type),
-  })
+  }),
 );
 
 export const recipe_schema = pgTable("recipes", {
@@ -50,6 +50,7 @@ export const embedding_schema = pgTable("embeddings", {
     .references(() => recipe_schema.id)
     .notNull(),
   type: text("type").notNull(),
+  /** OpenAI text-embedding-3-small produces 1536-d vectors */
   data: vector({ dimensions: 1536 }),
 });
 
