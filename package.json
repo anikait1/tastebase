@@ -1,5 +1,5 @@
 {
-  "name": "recipe-gpt",
+  "name": "tastebase",
   "module": "index.ts",
   "type": "module",
   "private": true,
@@ -22,7 +22,6 @@
   "dependencies": {
     "@ai-sdk/openai": "^2.0.35",
     "@elysiajs/openapi": "^1.4.11",
-    "@openrouter/ai-sdk-provider": "^1.2.0",
     "ai": "^5.0.51",
     "drizzle-orm": "^0.44.5",
     "elysia": "^1.4.7",

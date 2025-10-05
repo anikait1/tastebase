@@ -5,7 +5,7 @@ const createBaseLogger = () => {
   const options: LoggerOptions = {
     level,
     base: {
-      service: "recipe-gpt",
+      service: "tastebase",
     },
     timestamp: pino.stdTimeFunctions.isoTime,
     formatters: {
