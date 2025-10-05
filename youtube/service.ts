@@ -1,5 +1,7 @@
 import { Innertube } from "youtubei.js";
 
+export type InnertubeVideoInfo = Awaited<ReturnType<Innertube["getInfo"]>>;
+
 /**
  * Currently the client would be initialized globally and shared across the functions, however
  * since the client accepts options to create sessions which could change the behaviour depending
@@ -10,6 +12,10 @@ let client: Innertube;
 export async function init(): Promise<Innertube> {
   client = await Innertube.create();
   return client;
+}
+
+export async function getVideoInfo(videoId: string): Promise<InnertubeVideoInfo> {
+  return await client.getInfo(videoId);
 }
 
 /**
@@ -25,8 +31,7 @@ export async function init(): Promise<Innertube> {
  * errors during dog fooding of the app and understanding how the UX can be
  * shaped
  */
-export async function getTranscript(videoId: string): Promise<string> {
-  const videoInfo = await client.getInfo(videoId);
+export async function getTranscript(videoInfo: InnertubeVideoInfo): Promise<string> {
   /**
    * In case the `getTranscript` function does not work properly and older fallback implementation
    * is available: https://github.com/LuanRT/YouTube.js/issues/501

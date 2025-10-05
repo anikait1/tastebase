@@ -2,6 +2,7 @@ import * as z from "zod";
 import type { ParsedRecipeLlm } from "../llm/schema";
 import type { Database } from "../db";
 import type { AppLogger } from "../logger";
+import type { InnertubeVideoInfo } from "../youtube/service";
 
 export type RecipeSource = {
   id: number;
@@ -13,6 +14,7 @@ export type PipelineContext = {
   recipeSource: RecipeSource;
   db: Database;
   logger: AppLogger;
+  videoInfo: InnertubeVideoInfo;
   transcript?: string;
   recipe?: ParsedRecipeLlm;
 };
@@ -118,6 +120,17 @@ export class RecipeInputValidationFailed extends Error {
     super(params?.message ?? "Recipe validation failed", params?.options);
     this.data = zodError;
     this.name = "RecipeInputValidationFailed";
+  }
+}
+
+export class VideoUnavailable extends Error {
+  public readonly type = "videoUnavailable";
+  constructor(params?: { message?: string; options?: ErrorOptions }) {
+    super(
+      params?.message ?? "The referenced YouTube video is unavailable",
+      params?.options,
+    );
+    this.name = "VideoUnavailable";
   }
 }
 

@@ -39,6 +39,7 @@ import {
   type PipelineStep,
 } from "./type";
 import * as YoutubeService from "../youtube/service";
+import type { InnertubeVideoInfo } from "../youtube/service";
 import { ensureDefined } from "../utils";
 
 /**
@@ -51,10 +52,9 @@ const RecipePipeline: PipelineStep[] = [transcriptStep, recipeStep, saveStep];
 async function transcriptStep(
   ctx: PipelineContext,
 ): Promise<TranscriptGenerated | TranscriptGenerationFailed> {
-  const { recipeSource, db, logger } = ctx;
-  const videoId = recipeSource.external_id;
+  const { recipeSource, db, logger, videoInfo } = ctx;
 
-  const event = await YoutubeService.getTranscript(videoId)
+  const event = await YoutubeService.getTranscript(videoInfo)
     .then((transcript) => {
       ctx.transcript = transcript;
       return new TranscriptGenerated(transcript);
@@ -154,13 +154,19 @@ export async function* processRecipePipeline(
   recipeSource: RecipeSource,
   db: Database,
   logger: AppLogger,
+  videoInfo: InnertubeVideoInfo,
   startFrom: number = 0,
 ): AsyncGenerator<RecipePipelineEventType> {
   const scopedLogger = logger.child({
     scope: "recipe-pipeline",
     videoId: recipeSource.external_id,
   });
-  const ctx: PipelineContext = { recipeSource, db, logger: scopedLogger };
+  const ctx: PipelineContext = {
+    recipeSource,
+    db,
+    logger: scopedLogger,
+    videoInfo,
+  };
 
   for (const step of RecipePipeline.slice(startFrom)) {
     const event = await step(ctx);

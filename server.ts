@@ -96,6 +96,10 @@ const app = new Elysia()
             // TODO - finalize error object
             return status(422);
           }
+          case "videoUnavailable": {
+            // Video does not exist/invalid; return not found
+            return status(404);
+          }
           case "transcriptGenerated": {
             yield event;
             break;

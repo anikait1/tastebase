@@ -18,8 +18,10 @@ import {
   type Recipe,
   type RecipePipelineEventType,
   type RecipeSource,
+  VideoUnavailable,
 } from "./type";
 import { ensureDefined } from "../utils";
+import * as YoutubeService from "../youtube/service";
 
 /**
  * Validates input, enforces dedup by (external_id,type), persists a recipe_source,
@@ -44,7 +46,10 @@ export async function* processRecipeFromSource(
   db: Database,
   logger: AppLogger,
 ): AsyncGenerator<
-  RecipePipelineEventType | RecipeInputValidationFailed | RecipeAlreadyExists
+  | RecipePipelineEventType
+  | RecipeInputValidationFailed
+  | RecipeAlreadyExists
+  | VideoUnavailable
 > {
   const sourceType = schema.type;
   const scopedLogger = logger.child({
@@ -82,6 +87,15 @@ export async function* processRecipeFromSource(
     return;
   }
 
+  const videoInfo = await YoutubeService.getVideoInfo(externalId).catch(error => {
+    scopedLogger.warn({error}, "Video unavailable or invalid")
+    return null;
+  });
+  if (!videoInfo) {
+    yield new VideoUnavailable();
+    return;
+  }
+
   const recipeSource = await createRecipeSource({
     type: sourceType,
     externalId: externalId,
@@ -91,6 +105,7 @@ export async function* processRecipeFromSource(
     recipeSource,
     db,
     logger,
+    videoInfo,
   )) {
     yield event;
   }
