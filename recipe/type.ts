@@ -65,6 +65,8 @@ export class RecipeSaved {
 
 export class TranscriptGenerationFailed extends Error {
   public readonly type = RecipePipelineErrors.transcriptGenerationFailed;
+  public readonly uri =
+    "https://tastebase.dev/http-errors/transcript-generation-failed";
   constructor(params?: { message?: string; options?: ErrorOptions }) {
     super(
       params?.message ?? "Unable to generate the transcription for the video",
@@ -76,6 +78,8 @@ export class TranscriptGenerationFailed extends Error {
 
 export class RecipeGenerationFailed extends Error {
   public readonly type = RecipePipelineErrors.recipeGenerationFailed;
+  public readonly uri =
+    "https://tastebase.dev/http-errors/recipe-generation-failed";
   constructor(params?: { message?: string; options?: ErrorOptions }) {
     super(
       params?.message ??
@@ -88,6 +92,8 @@ export class RecipeGenerationFailed extends Error {
 
 export class RecipeSavingFailed extends Error {
   public readonly type = RecipePipelineErrors.recipeSavingFailed;
+  public readonly uri =
+    "https://tastebase.dev/http-errors/recipe-saving-failed";
   constructor(params?: { message?: string; options?: ErrorOptions }) {
     super(
       params?.message ?? "Unable to save the generated recipe",
@@ -99,6 +105,8 @@ export class RecipeSavingFailed extends Error {
 
 export class RecipeAlreadyExists extends Error {
   public readonly type = "recipeAlreadyExists";
+  public readonly uri =
+    "https://tastebase.dev/http-errors/recipe-already-exists";
   public readonly recipeId: number;
   constructor(
     recipeId: number,
@@ -112,6 +120,8 @@ export class RecipeAlreadyExists extends Error {
 
 export class RecipeInputValidationFailed extends Error {
   public readonly type = "recipeInputValidationFailed";
+  public readonly uri =
+    "https://tastebase.dev/http-errors/recipe-input-validation";
   public readonly data: z.ZodError;
   constructor(
     zodError: z.ZodError,
@@ -125,6 +135,7 @@ export class RecipeInputValidationFailed extends Error {
 
 export class VideoUnavailable extends Error {
   public readonly type = "videoUnavailable";
+  public readonly uri = "https://tastebase.dev/http-errors/video-unavailable";
   constructor(params?: { message?: string; options?: ErrorOptions }) {
     super(
       params?.message ?? "The referenced YouTube video is unavailable",
@@ -136,6 +147,8 @@ export class VideoUnavailable extends Error {
 
 export class VideoTranscriptUnavailable extends Error {
   public readonly type = "videoTranscriptUnavailable";
+  public readonly uri =
+    "https://tastebase.dev/http-errors/video-transcript-unavailable";
   constructor(params?: { message?: string; options?: ErrorOptions }) {
     super(params?.message ?? "Video transcript not available", params?.options);
     this.name = "VideoTranscriptUnavailable";

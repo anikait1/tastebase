@@ -3,12 +3,11 @@ import { openapi } from "@elysiajs/openapi";
 import * as z from "zod";
 import { inputRecipeSchema } from "./recipe/schema";
 import * as RecipeService from "./recipe/service";
-import * as RecipeJobService from "./recipe/job";
 import * as YoutubeService from "./youtube/service";
 import { dbClient } from "./db";
 import { baseLogger } from "./logger";
-
-const youtubeClient = await YoutubeService.init();
+import { ProblemDetails } from "./utils";
+import { LlmRejectedError } from "./llm/type";
 
 /**
  * HTTP server: attaches request-scoped metadata (id, startTime, logger) and
@@ -65,7 +64,7 @@ const app = new Elysia()
     );
   })
   .decorate("db", dbClient)
-  .decorate("yt", youtubeClient)
+  .decorate("yt", await YoutubeService.init())
   .use(
     openapi({
       mapJsonSchema: {
@@ -73,6 +72,7 @@ const app = new Elysia()
       },
     }),
   )
+
   .post(
     "/recipe",
     /**
@@ -81,7 +81,14 @@ const app = new Elysia()
      *  - yields TranscriptGenerated → RecipeGenerated → RecipeSaved
      *  - on validation/conflict returns 422/409; on pipeline errors returns 500.
      */
-    async function* createRecipe({ logger, body, status, db }) {
+    async function* createRecipe({
+      logger,
+      body,
+      status,
+      db,
+      requestId,
+      request,
+    }) {
       for await (const event of RecipeService.processRecipeFromSource(
         body,
         db,
@@ -89,20 +96,99 @@ const app = new Elysia()
       )) {
         switch (event.type) {
           case "recipeAlreadyExists": {
-            // TODO - finalize error object
-            return status(409);
+            return status(
+              409,
+              new ProblemDetails({
+                type: event.uri,
+                title: "Recipe for the given source already exists",
+                status: 409,
+                instance: request.url,
+                extensions: {
+                  requestId,
+                  recipeId: event.recipeId,
+                },
+              }),
+            );
           }
           case "recipeInputValidationFailed": {
-            // TODO - finalize error object
-            return status(422);
+            return status(
+              422,
+              new ProblemDetails({
+                type: event.uri,
+                title: "Invalid recipe input",
+                status: 422,
+                extensions: {
+                  requestId,
+                  issues: z.treeifyError(event.data),
+                },
+              }),
+            );
           }
           case "videoUnavailable": {
-            // Video does not exist/invalid; return not found
-            return status(404);
+            return status(
+              422,
+              new ProblemDetails({
+                type: event.uri,
+                title: "Video unavailable",
+                status: 422,
+                detail:
+                  "The referenced YouTube video is unavailable or invalid.",
+                instance: request.url,
+                extensions: { requestId },
+              }),
+            );
           }
           case "videoTranscriptUnavailable": {
-            // Video exists but transcript is missing
-            return status(422);
+            return status(
+              422,
+              new ProblemDetails({
+                type: event.uri,
+                title: "Video transcript not available",
+                status: 422,
+                detail: "This video has no captions/transcript available.",
+                instance: request.url,
+                extensions: { requestId },
+              }),
+            );
+          }
+          case "recipeGenerationFailed":
+          case "transcriptGenerationFailed":
+          case "recipeSavingFailed": {
+            if (event.cause instanceof LlmRejectedError) {
+              console.log(event.cause.message);
+              return status(
+                422,
+                new ProblemDetails({
+                  type: event.uri,
+                  title: "Cannot infer a recipe from the provided source",
+                  status: 422,
+                  instance: request.url,
+                  detail: event.cause.message,
+                  extensions: {
+                    requestId,
+                  },
+                }),
+              );
+            }
+
+            logger.error(
+              event,
+              "Something went wrong while execution of recipe pipeline",
+            );
+            return status(
+              500,
+              new ProblemDetails({
+                type: event.uri,
+                title: "Recipe generation failed",
+                status: 500,
+                instance: request.url,
+                detail:
+                  "An unexpected internal error occurred. This is on us—not you. Please share the requestId so we can investigate.",
+                extensions: {
+                  requestId,
+                },
+              }),
+            );
           }
           case "transcriptGenerated": {
             yield event;
@@ -115,13 +201,6 @@ const app = new Elysia()
           case "recipeSaved": {
             yield event;
             break;
-          }
-          // TODO - finalize error object
-          case "transcriptGenerationFailed":
-          case "recipeGenerationFailed":
-          case "recipeSavingFailed": {
-            logger.error(event, "Something went wrong while creating recipe");
-            return status(500);
           }
         }
       }
@@ -152,16 +231,28 @@ const app = new Elysia()
       }),
     },
   )
-  .get("/recipe/:recipe-id", () => {}, {
-    detail: {
-      summary: "Get recipe",
-      description:
-        "Retrieves a complete recipe by its unique ID. Returns the full recipe data including ingredients, instructions, metadata, and any associated processing information.",
+  .get(
+    "/recipe/:recipe-id",
+    async ({ logger, params, db }) => {
+      logger.debug({ recipeId: params["recipe-id"] }, "Getting recipe");
+      const recipe = await RecipeService.getRecipeById(params["recipe-id"], db);
+      if (!recipe) {
+        return status(404);
+      }
+
+      return recipe;
     },
-    params: z.object({
-      "recipe-id": z.coerce.number().describe("Recipe ID"),
-    }),
-  })
+    {
+      detail: {
+        summary: "Get recipe",
+        description:
+          "Retrieves a complete recipe by its unique ID. Returns the full recipe data including ingredients, instructions, metadata, and any associated processing information.",
+      },
+      params: z.object({
+        "recipe-id": z.coerce.number().describe("Recipe ID"),
+      }),
+    },
+  )
   .listen(6969);
 
 baseLogger.info({ url: app.server?.url }, "Elysia server listening");

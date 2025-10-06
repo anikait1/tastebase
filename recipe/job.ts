@@ -170,11 +170,21 @@ export async function* processRecipePipeline(
 
   for (const step of RecipePipeline.slice(startFrom)) {
     const event = await step(ctx);
-    yield event;
-
+    /**
+     * The order of yield and return here is important. In case
+     * we decide to yield first for the error case as well, chances
+     * are server would return an error response to the client
+     * and this function may not be called again. Therefore it is
+     * important to ensure the logging for error event happens
+     * before yielding the event
+     */
     if (event.type in RecipePipelineErrors) {
-      // Early exit on first error event
+      logger.error({ error: event }, "Recipe pipeline failed");
+
+      yield event;
       return;
     }
+
+    yield event;
   }
 }

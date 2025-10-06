@@ -170,6 +170,25 @@ export async function searchRecipes(query: string, db: Database) {
     .orderBy(desc(finalScore));
 }
 
+export async function getRecipeById(
+  recipeId: number,
+  db: Database,
+): Promise<Recipe | null> {
+  const [recipe] = await db
+    .select({
+      id: recipe_schema.id,
+      name: recipe_schema.name,
+      instructions: recipe_schema.instructions,
+      ingredients: recipe_schema.ingredients,
+      tags: recipe_schema.tags,
+    })
+    .from(recipe_schema)
+    .where(eq(recipe_schema.id, recipeId));
+
+  if (!recipe) return null;
+  return recipe;
+}
+
 async function getRecipeByExternalId(
   externalId: string,
   type: string,
@@ -189,6 +208,7 @@ async function getRecipeByExternalId(
       and(
         eq(recipe_schema.recipe_source_id, recipe_source_schema.id),
         eq(recipe_source_schema.external_id, externalId),
+        eq(recipe_source_schema.type, type),
       ),
     );
 
