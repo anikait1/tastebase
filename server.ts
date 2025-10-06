@@ -1,4 +1,4 @@
-import { Elysia, status } from "elysia";
+import { Elysia, sse, status } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 import * as z from "zod";
 import { inputRecipeSchema } from "./recipe/schema";
@@ -79,7 +79,7 @@ const app = new Elysia()
      * Streams recipe pipeline events back to the client as they complete.
      * Contract:
      *  - yields TranscriptGenerated → RecipeGenerated → RecipeSaved
-     *  - on validation/conflict returns 422/409; on pipeline errors returns 500.
+     *  - on validation/conflict returns 422/409;
      */
     async function* createRecipe({
       logger,
@@ -151,57 +151,55 @@ const app = new Elysia()
               }),
             );
           }
+          /**
+           * These errors are treated differently since they originate during
+           * the execution of a pipeline and by this time the event stream
+           * has started, so better to return the errors as sse only rather
+           * a return object since the client would be consuming the events
+           * and not expecting a response
+           */
           case "recipeGenerationFailed":
           case "transcriptGenerationFailed":
           case "recipeSavingFailed": {
             if (event.cause instanceof LlmRejectedError) {
-              console.log(event.cause.message);
-              return status(
-                422,
-                new ProblemDetails({
-                  type: event.uri,
-                  title: "Cannot infer a recipe from the provided source",
-                  status: 422,
-                  instance: request.url,
-                  detail: event.cause.message,
-                  extensions: {
-                    requestId,
-                  },
-                }),
+              logger.error(
+                event,
+                "Something went wrong while execution of recipe pipeline",
               );
             }
 
-            logger.error(
-              event,
-              "Something went wrong while execution of recipe pipeline",
-            );
-            return status(
-              500,
-              new ProblemDetails({
+            yield sse({
+              event: event.type,
+              data: new ProblemDetails({
                 type: event.uri,
-                title: "Recipe generation failed",
-                status: 500,
+                title:
+                  event.cause instanceof LlmRejectedError
+                    ? "Cannot infer a recipe from the provided source"
+                    : "Recipe generation failed",
+                status: event.cause instanceof LlmRejectedError ? 422 : 500,
                 instance: request.url,
                 detail:
-                  "An unexpected internal error occurred. This is on us—not you. Please share the requestId so we can investigate.",
+                  event.cause instanceof LlmRejectedError
+                    ? event.cause.message
+                    : "An unexpected internal error occurred. This is on us—not you. Please share the requestId so we can investigate.",
                 extensions: {
                   requestId,
                 },
               }),
-            );
+            });
+
+            return;
           }
-          case "transcriptGenerated": {
-            yield event;
+          case "transcriptGenerated":
+          case "recipeGenerated":
+          case "recipeSaved":
+            {
+              yield sse({
+                event: event.type,
+                data: event,
+              });
+            }
             break;
-          }
-          case "recipeGenerated": {
-            yield event;
-            break;
-          }
-          case "recipeSaved": {
-            yield event;
-            break;
-          }
         }
       }
     },
