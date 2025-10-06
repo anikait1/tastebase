@@ -19,6 +19,7 @@ import {
   type RecipePipelineEventType,
   type RecipeSource,
   VideoUnavailable,
+  VideoTranscriptUnavailable,
 } from "./type";
 import { ensureDefined } from "../utils";
 import * as YoutubeService from "../youtube/service";
@@ -50,6 +51,7 @@ export async function* processRecipeFromSource(
   | RecipeInputValidationFailed
   | RecipeAlreadyExists
   | VideoUnavailable
+  | VideoTranscriptUnavailable
 > {
   const sourceType = schema.type;
   const scopedLogger = logger.child({
@@ -87,12 +89,21 @@ export async function* processRecipeFromSource(
     return;
   }
 
-  const videoInfo = await YoutubeService.getVideoInfo(externalId).catch(error => {
-    scopedLogger.warn({error}, "Video unavailable or invalid")
-    return null;
-  });
+  const videoInfo = await YoutubeService.getVideoInfo(externalId).catch(
+    (error) => {
+      scopedLogger.warn({ error }, "Video unavailable or invalid");
+      return null;
+    },
+  );
   if (!videoInfo) {
     yield new VideoUnavailable();
+    return;
+  }
+
+  const hasCaptions = (videoInfo.captions?.caption_tracks?.length ?? 0) > 0 ;
+  if (!hasCaptions) {
+    scopedLogger.info("Video transcript not available");
+    yield new VideoTranscriptUnavailable();
     return;
   }
 

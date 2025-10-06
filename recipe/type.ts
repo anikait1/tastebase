@@ -134,6 +134,14 @@ export class VideoUnavailable extends Error {
   }
 }
 
+export class VideoTranscriptUnavailable extends Error {
+  public readonly type = "videoTranscriptUnavailable";
+  constructor(params?: { message?: string; options?: ErrorOptions }) {
+    super(params?.message ?? "Video transcript not available", params?.options);
+    this.name = "VideoTranscriptUnavailable";
+  }
+}
+
 export type RecipePipelineSuccessEvent =
   | TranscriptGenerated
   | RecipeGenerated

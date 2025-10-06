@@ -100,6 +100,10 @@ const app = new Elysia()
             // Video does not exist/invalid; return not found
             return status(404);
           }
+          case "videoTranscriptUnavailable": {
+            // Video exists but transcript is missing
+            return status(422);
+          }
           case "transcriptGenerated": {
             yield event;
             break;
