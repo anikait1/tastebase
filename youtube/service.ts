@@ -14,7 +14,9 @@ export async function init(): Promise<Innertube> {
   return client;
 }
 
-export async function getVideoInfo(videoId: string): Promise<InnertubeVideoInfo> {
+export async function getVideoInfo(
+  videoId: string,
+): Promise<InnertubeVideoInfo> {
   return await client.getInfo(videoId);
 }
 
@@ -31,7 +33,9 @@ export async function getVideoInfo(videoId: string): Promise<InnertubeVideoInfo>
  * errors during dog fooding of the app and understanding how the UX can be
  * shaped
  */
-export async function getTranscript(videoInfo: InnertubeVideoInfo): Promise<string> {
+export async function getTranscript(
+  videoInfo: InnertubeVideoInfo,
+): Promise<string> {
   /**
    * In case the `getTranscript` function does not work properly and older fallback implementation
    * is available: https://github.com/LuanRT/YouTube.js/issues/501

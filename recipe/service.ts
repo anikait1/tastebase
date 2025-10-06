@@ -100,7 +100,7 @@ export async function* processRecipeFromSource(
     return;
   }
 
-  const hasCaptions = (videoInfo.captions?.caption_tracks?.length ?? 0) > 0 ;
+  const hasCaptions = (videoInfo.captions?.caption_tracks?.length ?? 0) > 0;
   if (!hasCaptions) {
     scopedLogger.info("Video transcript not available");
     yield new VideoTranscriptUnavailable();
