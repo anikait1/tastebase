@@ -112,14 +112,7 @@ export async function* processRecipeFromSource(
     externalId: externalId,
     db,
   });
-  for await (const event of RecipeJobService.processRecipePipeline(
-    recipeSource,
-    db,
-    logger,
-    videoInfo,
-  )) {
-    yield event;
-  }
+  yield *RecipeJobService.processRecipePipeline(recipeSource, db, logger, videoInfo);
 }
 
 /**
